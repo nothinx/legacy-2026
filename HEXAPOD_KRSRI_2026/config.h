@@ -161,4 +161,8 @@ const uint8_t ARM_PIN_MAP_L[ARM_NUM_SERVOS][2] = { {1, 12}, {1, 13}, {1, 14} };
 #define SERVO_PWM_FREQ    50      // Hz, frekuensi sinyal PCA9685
 #define SERVO_COMMIT_MS   20      // ms, periode kirim 18 pulse (20=50Hz, 10=100Hz)
 
+// Loop kontrol laju-tetap (dt deterministik utk gait/PID/stabilisasi).
+#define CONTROL_HZ        100     // Hz, tick loop utama (servo commit tetap di SERVO_COMMIT_MS)
+#define PROFILE_LOOP      1       // 1 = cetak "PROF avg/max/util" tiap detik (saat tak tuning)
+
 #endif

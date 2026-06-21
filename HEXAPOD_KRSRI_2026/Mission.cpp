@@ -22,6 +22,16 @@ void Mission::enter(MissionState s) {
 
 void Mission::apply(const NavCmd& c) { _r->walk(c.forward, c.strafe, c.turn); }
 
+// Wall-follow dgn dukungan arena cermin (arena.mirror=1 -> ikut dinding KIRI, heading tercermin).
+// Cermin kiri-kanan: heading' = (360 - heading) mod 360 (Timur<->Barat, Utara/Selatan tetap).
+static NavCmd followWall(Pid& hp, Pid& wp, bool mir, float yaw, float head,
+                         int front, int right, int left, float dt) {
+    float h = mir ? fmodf(360.0f - head, 360.0f) : head;
+    return mir ? Nav::followWallLeft (hp, wp, yaw, h, front, left,  dt)
+               : Nav::followWallRight(hp, wp, yaw, h, front, right, dt);
+}
+static float mirrorHead(bool mir, float head) { return mir ? fmodf(360.0f - head, 360.0f) : head; }
+
 // Sekuens lengan ambil korban (non-blocking). return true bila selesai.
 // ponytail: default lengan kanan; pilih sisi via x_norm vision saat itu disambung.
 static bool runPick(Hexapod* r, int& step, HexaArm* a) {
@@ -57,6 +67,10 @@ void Mission::update() {
     int right  = _l->getDistance(LIDAR_RIGHT);
     int left   = _l->getDistance(LIDAR_LEFT);
 
+    // Arena cermin (hadap kiri): ikut dinding kiri + heading tercermin + lengan sisi kiri.
+    bool mir = gParam[K_ARENA_MIRROR] >= 0.5f;
+    HexaArm* pickArm = mir ? _r->armLeft() : _r->armRight();
+
     // recovery global: state navigasi yang kelamaan -> mundur sebentar lalu lanjut.
     bool navState = (_state == M_TO_VICTIM1 || _state == M_TO_SZ1 ||
                      _state == M_TO_VICTIM2 || _state == M_TO_SZ2 ||
@@ -73,45 +87,45 @@ void Mission::update() {
             break;
 
         case M_TO_VICTIM1:
-            apply(Nav::followWallRight(_headPid, _wallPid, yaw, HEAD_UTARA, front, right, dt));
+            apply(followWall(_headPid, _wallPid, mir, yaw, HEAD_UTARA, front, right, left, dt));
             if (front >= 0 && front <= VICTIM_REACH_CM) enter(M_PICK_VICTIM1);
             break;
 
         case M_PICK_VICTIM1:
-            if (runPick(_r, _subStep, _r->arm())) enter(M_TO_SZ1);
+            if (runPick(_r, _subStep, pickArm)) enter(M_TO_SZ1);
             break;
 
         case M_TO_SZ1:
-            apply(Nav::followWallRight(_headPid, _wallPid, yaw, HEAD_BARAT, front, right, dt));
+            apply(followWall(_headPid, _wallPid, mir, yaw, HEAD_BARAT, front, right, left, dt));
             if (front >= 0 && front <= SZ_REACH_CM) enter(M_DROP_SZ1);
             break;
 
         case M_DROP_SZ1:
-            if (runDrop(_r, _subStep, _r->arm())) enter(M_TO_VICTIM2);
+            if (runDrop(_r, _subStep, pickArm)) enter(M_TO_VICTIM2);
             break;
 
         case M_TO_VICTIM2:
-            apply(Nav::followWallRight(_headPid, _wallPid, yaw, HEAD_SELATAN, front, right, dt));
+            apply(followWall(_headPid, _wallPid, mir, yaw, HEAD_SELATAN, front, right, left, dt));
             if (front >= 0 && front <= VICTIM_REACH_CM) enter(M_PICK_VICTIM2);
             break;
 
         case M_PICK_VICTIM2:
-            if (runPick(_r, _subStep, _r->arm())) enter(M_TO_SZ2);
+            if (runPick(_r, _subStep, pickArm)) enter(M_TO_SZ2);
             break;
 
         case M_TO_SZ2:
-            apply(Nav::followWallRight(_headPid, _wallPid, yaw, HEAD_TIMUR, front, right, dt));
-            if (front >= 0 && front <= SZ_REACH_CM) { runDrop(_r, _subStep, _r->arm()); enter(M_TO_STAIRS); }
+            apply(followWall(_headPid, _wallPid, mir, yaw, HEAD_TIMUR, front, right, left, dt));
+            if (front >= 0 && front <= SZ_REACH_CM) { runDrop(_r, _subStep, pickArm); enter(M_TO_STAIRS); }
             break;
 
         case M_TO_STAIRS:
-            apply(Nav::followWallRight(_headPid, _wallPid, yaw, HEAD_SELATAN, front, right, dt));
+            apply(followWall(_headPid, _wallPid, mir, yaw, HEAD_SELATAN, front, right, left, dt));
             if (front >= 0 && front <= STAIR_REACH_CM) enter(M_CLIMB_STAIRS);
             break;
 
         case M_CLIMB_STAIRS:
             _r->profileStairs();
-            apply(Nav::goStraight(_headPid, yaw, HEAD_SELATAN, dt));
+            apply(Nav::goStraight(_headPid, yaw, mirrorHead(mir, HEAD_SELATAN), dt));
             // selesai naik bila pitch kembali ~datar setelah sempat menanjak (TUNE),
             // atau lidar depan terbuka lagi.
             if (elapsed() > 8000 && front > 40) { _r->profileFlat(); enter(M_DONE); }
@@ -121,5 +135,4 @@ void Mission::update() {
             _r->stop();
             break;
     }
-    (void)left; // tersedia bila ingin ganti ke ikut dinding kiri
 }

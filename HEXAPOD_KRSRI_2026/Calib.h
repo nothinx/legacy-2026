@@ -18,6 +18,7 @@ enum ParamId {
     K_STAB_TAU, K_STAB_SIGN_ROLL, K_STAB_SIGN_PITCH,
     K_HEADING_KP, K_HEADING_KD, K_WALL_KP, K_WALL_KD, K_WALL_SETPOINT,
     K_HEAD_UTARA, K_HEAD_TIMUR, K_HEAD_SELATAN, K_HEAD_BARAT,
+    K_ARENA_MIRROR,   // 0 = arena hadap kanan (default), 1 = cermin (hadap kiri)
     // pose lengan: tiap pose 3 entri kontigu (base, shoulder, gripper).
     // urut HARUS sama dgn enum ArmPose {PARK,REACH,GRIP,LIFT,DROP} -> poseData pakai stride 3.
     K_ARM_PARK_B, K_ARM_PARK_S, K_ARM_PARK_G,

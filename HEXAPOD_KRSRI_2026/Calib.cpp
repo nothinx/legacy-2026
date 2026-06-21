@@ -12,7 +12,7 @@
   } EEPROM;
 #endif
 
-#define CALIB_VERSION 1
+#define CALIB_VERSION 2     // naikkan bila layout CalibBlob/urutan param berubah
 #define CALIB_ADDR    0
 
 // Default + rentang slider GUI. URUTAN HARUS sama dengan enum ParamId.
@@ -38,6 +38,7 @@ const ParamDef PARAM_DEFS[N_PARAMS] = {
     { "head.timur",        90.0f,    0.0f,  360.0f },
     { "head.selatan",     180.0f,    0.0f,  360.0f },
     { "head.barat",       270.0f,    0.0f,  360.0f },
+    { "arena.mirror",       0.0f,    0.0f,    1.0f },   // 0=hadap kanan, 1=cermin (hadap kiri)
     { "arm.park.base",     90.0f,    0.0f,  180.0f },
     { "arm.park.shoulder", 30.0f,    0.0f,  180.0f },
     { "arm.park.grip",     20.0f,    0.0f,  180.0f },

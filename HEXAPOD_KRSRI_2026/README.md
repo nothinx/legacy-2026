@@ -51,6 +51,11 @@ HEXAPOD_KRSRI_2026.ino        <- main: baca sensor -> Mission -> robot.update()
 Konvensi sumbu **body frame**: `+X = kanan, +Y = depan, +Z = atas`, origin pusat badan.
 `walk(forward, strafe, turn)` → maju(+)/mundur(−), geser kanan(+)/kiri(−), putar CCW(+).
 
+**Loop laju-tetap:** `loop()` jalan tepat tiap `1/CONTROL_HZ` (default 100 Hz) → `dt`
+gait/PID/stabilisasi deterministik. Profiling (`PROFILE_LOOP=1`) mencetak tiap detik
+`PROF avg=..us max=..us util=..%` (saat tak tuning); `util > 100%` = loop tak sanggup laju
+itu → turunkan `CONTROL_HZ` atau optimasi. Servo commit tetap di `SERVO_COMMIT_MS` (50 Hz).
+
 ---
 
 ## 3. Hardware & Wiring
@@ -176,9 +181,15 @@ dead-reckoning lama yang rapuh.
 **Yang harus Anda tune** (ditandai `TUNE` di `Mission.cpp`):
 - `VICTIM_REACH_CM`, `SZ_REACH_CM`, `STAIR_REACH_CM`, `STATE_TIMEOUT`.
 - Heading target tiap state (`HEAD_*`) sesuai denah arena.
-- Sisi dinding (`followWallRight` ↔ `followWallLeft`) sesuai jalur.
 
-Pose lengan ambil/taruh korban: `ARM_POSE_*` di `config.h`.
+**Arena cermin (2 arena: hadap kanan/kiri).** Knob runtime `arena.mirror` (GUI/EEPROM):
+- `0` = default (ikut dinding KANAN, heading apa adanya, lengan kanan).
+- `1` = cermin kiri-kanan: ikut dinding **KIRI**, heading tercermin `(360−h)%360`
+  (Timur↔Barat tukar, Utara/Selatan tetap), lengan **kiri**. FSM sama, otomatis di-mirror.
+- Set via GUI tuner **atau** dari Raspberry Pi/SSH: kirim `SET arena.mirror 1` lalu `SAVE`
+  ke serial Teensy (perintah jalan di mode RUN maupun TUNE).
+
+Pose lengan ambil/taruh korban: `ARM_POSE_*` (knob runtime, GUI).
 Pakai `Serial` print `mission.state()` untuk debug di lapangan.
 
 > Catatan: deteksi korban via kamera (Raspberry Pi → Serial) belum disambung di sini —

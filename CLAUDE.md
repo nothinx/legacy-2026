@@ -38,9 +38,10 @@ R11 hanya 30 cm; lebar robot 36,9 cm → **tidak muat** stance normal. Tambah `p
 (kecilkan `STAND_RADIUS` efektif / rapatkan kaki) + state khusus R11. Verifikasi bentang kaki ≤ 28–29 cm.
 
 ### 6. Pematangan lain (RENDAH)
-- EEPROM: simpan offset servo/tare IMU/setpoint dinding (tuning di venue tanpa recompile).
-- Telemetri serial terstruktur (state/jarak/pose/tegangan) ter-throttle.
-- Scheduler laju-tetap (tick 100Hz via elapsedMicros) untuk dt deterministik.
+- ✅ EEPROM + tuning runtime: `Calib.h/.cpp` + GUI `hexapod_tuner.html` (Web Serial) + `SerialTuner`.
+- ✅ Scheduler laju-tetap: tick `CONTROL_HZ`=100 via `elapsedMicros` + profiling `PROF` (di `.ino`).
+- ✅ Arena cermin: knob `arena.mirror` (0/1) → mirror wall-side+heading+lengan di `Mission.cpp`.
+- Telemetri serial terstruktur (state/jarak/pose/tegangan) ter-throttle (PROF sudah ada, perluas).
 - Lidar 2 lapis (R5/R10 medan berat): adaptasi pijakan via kontak kaki (arus servo/limit switch).
 
 ## KALIBRASI WAJIB sebelum lomba (lihat HEXAPOD_KRSRI_2026/README.md §5)
