@@ -66,6 +66,7 @@ Konvensi sumbu **body frame**: `+X = kanan, +Y = depan, +Z = atas`, origin pusat
 - **Lidar**: 6× VL53L1X di belakang mux I2C **TCA9548A** (`0x70`). Indeks → arti di `config.h`
   (`LIDAR_FRONT`, `LIDAR_RIGHT`, dst) — **samakan dengan pemasangan fisik**. Pasang < 10 cm (dinding arena 10 cm).
 - **Pull-up I2C**: 1 bus dengan banyak device + trace PCB → pakai pull-up 2.2k–4.7k untuk integritas sinyal di 400 kHz.
+- **Wiring & perbaikan hardware** (pisah bus I2C, kendali OE, daya, proteksi): lihat **`../elektrikal/README.md`**.
 
 ### Anggaran bus I2C (kenapa 1 bus @400 kHz cukup untuk 50 Hz)
 1 byte I2C @400 kHz ≈ 22,5 µs. `writeMicroseconds` per servo ≈ 6 byte ≈ ~160 µs → 18 servo ≈ **~2,9 ms**
