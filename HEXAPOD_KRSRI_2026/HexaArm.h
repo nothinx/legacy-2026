@@ -6,7 +6,7 @@
 // ponytail: hanya kontrol pose preset (config.h), bukan IK lengan penuh.
 //   Tambah IK lengan hanya jika perlu jangkau koordinat sembarang.
 #include <Arduino.h>
-#include "config.h"
+#include "Calib.h"   // SERVO_PULSE_*, ARM_POSE_* runtime
 #include "types.h"
 #include "HexaServos.h"
 

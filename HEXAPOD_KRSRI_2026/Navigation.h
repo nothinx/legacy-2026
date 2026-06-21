@@ -4,7 +4,7 @@
 // Helper navigasi closed-loop (header-only, inline).
 // Menghasilkan perintah gerak {forward, strafe, turn} dari sensor.
 // FSM misi yang memanggil robot.walk(...) tiap loop -> non-blocking.
-#include "config.h"
+#include "Calib.h"   // WALL_SETPOINT_CM runtime
 #include "types.h"
 
 struct NavCmd { float forward, strafe, turn; };

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<!-- Hexapod KRSRI Tuner - Web Serial (Chrome/Edge). Buka file ini langsung; klik Connect.
+     Tanpa instalasi/dependency. Protokol = SerialTuner.cpp. -->
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Hexapod Tuner</title>
+<style>
+  body { font: 13px system-ui, sans-serif; margin: 12px; background:#111; color:#ddd; }
+  h2 { margin: 14px 0 6px; font-size: 15px; color:#6cf; }
+  button { font: inherit; padding: 4px 10px; margin: 2px; cursor: pointer; }
+  .bar button { background:#234; color:#cdf; border:1px solid #456; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { padding: 2px 6px; border-bottom: 1px solid #222; text-align: left; }
+  input[type=range] { width: 220px; vertical-align: middle; }
+  input[type=number] { width: 64px; background:#1a1a1a; color:#ddd; border:1px solid #333; }
+  .val { display:inline-block; width:64px; color:#9f9; }
+  .name { color:#bbb; }
+  #log { white-space: pre-wrap; height: 110px; overflow:auto; background:#0a0a0a;
+         border:1px solid #333; padding:6px; font-family: monospace; font-size:12px; }
+  .grp { display:flex; gap:24px; flex-wrap:wrap; }
+  .col { flex:1; min-width:340px; }
+  .err { color:#f88; }
+</style>
+</head>
+<body>
+<h2>Hexapod KRSRI Tuner</h2>
+<div class="bar">
+  <button id="connect">Connect</button>
+  <button id="redump">Re-DUMP</button>
+  <button id="home">HOME</button>
+  <button id="save">SAVE → EEPROM</button>
+  <button id="load">LOAD</button>
+  <button id="defaults">DEFAULTS</button>
+  <button id="run">MODE RUN (keluar)</button>
+  <span id="status">belum terhubung</span>
+</div>
+
+<div class="grp">
+  <div class="col">
+    <h2>Jog servo (pasang horn)</h2>
+    <table id="jog"></table>
+  </div>
+  <div class="col">
+    <h2>Kalibrasi servo kaki</h2>
+    <table id="calib"></table>
+  </div>
+</div>
+
+<h2>Knob gerak (gait / PID / heading / pose lengan)</h2>
+<table id="params"></table>
+
+<h2>Log</h2>
+<div id="log"></div>
+
+<script>
+let port, writer, reading = false;
+let dumping = false, dumpParams = [], dumpServos = [], jogCount = 24, calibCount = 18;
+let pulseMin = 500, pulseMax = 2500;
+const timers = {};
+
+function log(s, err) {
+  const d = document.getElementById('log');
+  d.innerHTML += (err ? '<span class="err">' : '<span>') + s + '</span>\n';
+  d.scrollTop = d.scrollHeight;
+}
+async function send(line) {
+  if (!writer) return;
+  await writer.write(new TextEncoder().encode(line + '\n'));
+}
+// throttle per-kontrol: kirim maks tiap 50ms agar serial tak banjir.
+function sendThrottled(key, line) {
+  clearTimeout(timers[key]);
+  timers[key] = setTimeout(() => send(line), 50);
+}
+
+async function connect() {
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+    writer = port.writable.getWriter();
+    document.getElementById('status').textContent = 'terhubung';
+    readLoop();
+    await send('MODE TUNE');
+    await send('DUMP');
+  } catch (e) { log('connect gagal: ' + e, true); }
+}
+
+async function readLoop() {
+  reading = true;
+  const dec = new TextDecoderStream();
+  port.readable.pipeTo(dec.writable);
+  const reader = dec.readable.getReader();
+  let buf = '';
+  while (reading) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += value;
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).replace(/\r$/, '');
+      buf = buf.slice(nl + 1);
+      if (line) handleLine(line);
+    }
+  }
+}
+
+function handleLine(line) {
+  const t = line.split(/\s+/);
+  if (t[0] === 'INFO') { jogCount = +t[1]; calibCount = +t[2]; dumping = true; dumpParams = []; dumpServos = []; }
+  else if (dumping && t[0] === 'P')   { dumpParams.push({ name: t[1], val: +t[2], lo: +t[3], hi: +t[4] }); }
+  else if (dumping && t[0] === 'SVO') { dumpServos.push({ id: +t[1], off: +t[2], trim: +t[3], inv: +t[4] }); }
+  else if (t[0] === 'END') { dumping = false; render(); log('DUMP ok (' + dumpParams.length + ' param, ' + dumpServos.length + ' servo)'); }
+  else log(line, line.startsWith('ERR'));
+}
+
+function render() {
+  const pm = dumpParams.find(p => p.name === 'pulse.min'), px = dumpParams.find(p => p.name === 'pulse.max');
+  if (pm) pulseMin = pm.val; if (px) pulseMax = px.val;
+
+  // Jog servo
+  let h = '<tr><th>id</th><th>pulse (us)</th><th></th></tr>';
+  for (let i = 0; i < jogCount; i++) {
+    h += `<tr><td>${i}</td>
+      <td><input type="range" min="${pulseMin}" max="${pulseMax}" value="1500" id="jog${i}"
+           oninput="onJog(${i})"><span class="val" id="jogv${i}">1500</span></td>
+      <td><button onclick="netral(${i})">Netral 1500</button></td></tr>`;
+  }
+  document.getElementById('jog').innerHTML = h;
+
+  // Kalibrasi servo kaki
+  h = '<tr><th>id</th><th>offset°</th><th>trim us</th><th>invert</th></tr>';
+  dumpServos.forEach(s => {
+    h += `<tr><td>${s.id}</td>
+      <td><input type="number" step="0.5" value="${s.off}" id="off${s.id}" onchange="onSvo(${s.id})"></td>
+      <td><input type="number" step="1" value="${s.trim}" id="trm${s.id}" onchange="onSvo(${s.id})"></td>
+      <td><input type="checkbox" ${s.inv ? 'checked' : ''} id="inv${s.id}" onchange="onSvo(${s.id})"></td></tr>`;
+  });
+  document.getElementById('calib').innerHTML = h;
+
+  // Knob gerak
+  h = '<tr><th>knob</th><th>nilai</th><th></th></tr>';
+  dumpParams.forEach(p => {
+    const step = (p.hi - p.lo) / 500 || 0.001;
+    h += `<tr><td class="name">${p.name}</td>
+      <td><input type="range" min="${p.lo}" max="${p.hi}" step="${step}" value="${p.val}"
+           id="par_${p.name}" oninput="onParam('${p.name}')"></td>
+      <td><span class="val" id="parv_${p.name}">${p.val}</span></td></tr>`;
+  });
+  document.getElementById('params').innerHTML = h;
+}
+
+function onJog(i) {
+  const v = document.getElementById('jog' + i).value;
+  document.getElementById('jogv' + i).textContent = v;
+  sendThrottled('jog' + i, `JOG ${i} ${v}`);
+}
+function netral(i) {
+  document.getElementById('jog' + i).value = 1500;
+  document.getElementById('jogv' + i).textContent = 1500;
+  send(`JOG ${i} 1500`);
+}
+function onSvo(id) {
+  const off = document.getElementById('off' + id).value;
+  const trm = document.getElementById('trm' + id).value;
+  const inv = document.getElementById('inv' + id).checked ? 1 : 0;
+  send(`SVO ${id} ${off} ${trm} ${inv}`);
+}
+function onParam(name) {
+  const v = document.getElementById('par_' + name).value;
+  document.getElementById('parv_' + name).textContent = v;
+  sendThrottled('par_' + name, `SET ${name} ${v}`);
+}
+
+document.getElementById('connect').onclick = connect;
+document.getElementById('redump').onclick  = () => send('DUMP');
+document.getElementById('home').onclick     = () => send('HOME');
+document.getElementById('save').onclick     = () => send('SAVE');
+document.getElementById('load').onclick     = () => { send('LOAD'); setTimeout(() => send('DUMP'), 100); };
+document.getElementById('defaults').onclick = () => { send('DEFAULTS'); setTimeout(() => send('DUMP'), 100); };
+document.getElementById('run').onclick      = () => send('MODE RUN');
+
+if (!('serial' in navigator)) log('Browser ini tak mendukung Web Serial. Pakai Chrome/Edge desktop.', true);
+</script>
+</body>
+</html>

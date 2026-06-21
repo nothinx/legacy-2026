@@ -10,7 +10,7 @@
 //  Semua berbasis waktu (dt), tidak tergantung kecepatan loop.
 //
 // Output -> legTargets[6] (Vec3) di FRAME BADAN, dibaca oleh Hexapod.
-#include "config.h"
+#include "Calib.h"   // GAIT_* runtime
 #include "types.h"
 
 struct GaitProfile {

@@ -67,45 +67,30 @@ const uint8_t SERVO_PIN_MAP[NUM_SERVOS][2] = {
 };
 
 // ---------------------------------------------------------------------
-//  KALIBRASI SERVO
-//  SERVO_PULSE_MIN/MAX = pulse (us) untuk 0 dan 180 derajat servo.
-//  SERVO_INVERT  = balik arah putaran sendi.
-//  SERVO_OFFSET  = derajat offset agar pose HOME = mekanik netral.
-//                  ATUR per-servo saat kalibrasi (lihat README bag. Kalibrasi).
-//  SERVO_TRIM_US = trim halus dalam mikrodetik (koreksi gear backlash).
+//  KALIBRASI SERVO -> RUNTIME (lihat Calib.h/.cpp)
+//  SERVO_PULSE_MIN/MAX, SERVO_INVERT/OFFSET/TRIM_US kini disetel via GUI tuner
+//  & disimpan di EEPROM. Nilai default ada di tabel PARAM_DEFS / applyDefaults
+//  (Calib.cpp). Nama simbol lama tetap dipakai konsumen (macro redirect di Calib.h).
 // ---------------------------------------------------------------------
-#define SERVO_PULSE_MIN  500
-#define SERVO_PULSE_MAX  2500
 
-const bool SERVO_INVERT[NUM_SERVOS] = {
-    false, false, false,  // Kaki 0
-    false, false, false,  // Kaki 1
-    false, false, false,  // Kaki 2
-    true,  true,  true,   // Kaki 3 (sisi kiri biasanya terbalik)
-    true,  true,  true,   // Kaki 4
-    true,  true,  true    // Kaki 5
-};
-const float SERVO_OFFSET[NUM_SERVOS] = {
-    0,0,0,  0,0,0,  0,0,0,   // kanan
-    0,0,0,  0,0,0,  0,0,0    // kiri  (isi saat kalibrasi)
-};
-const int16_t SERVO_TRIM_US[NUM_SERVOS] = {
-    0,0,0,  0,0,0,  0,0,0,
-    0,0,0,  0,0,0,  0,0,0
+// Peta pin gabungan untuk JOG tuner: 0..17 kaki, 18..20 lengan kanan, 21..23 kiri.
+#define NUM_TUNE_SERVOS 24
+const uint8_t TUNE_PIN_MAP[NUM_TUNE_SERVOS][2] = {
+    {0, 8},  {0, 9},  {0, 10}, // Kaki 0
+    {0, 4},  {0, 5},  {0, 6},  // Kaki 1
+    {0, 0},  {0, 1},  {0, 2},  // Kaki 2
+    {1, 8},  {1, 9},  {1, 10}, // Kaki 3
+    {1, 4},  {1, 5},  {1, 6},  // Kaki 4
+    {1, 0},  {1, 1},  {1, 2},  // Kaki 5
+    {0, 12}, {0, 13}, {0, 14}, // Lengan kanan (base,shoulder,gripper)
+    {1, 12}, {1, 13}, {1, 14}  // Lengan kiri
 };
 
 // ---------------------------------------------------------------------
-//  GAIT (default = jalan datar). Profil medan diatur runtime via setProfile.
+//  GAIT -> RUNTIME (Calib.h): GAIT_STEP_HEIGHT/LENGTH/CYCLE_TIME/DUTY,
+//  GAIT_SLEW_RATE/PROFILE_TAU/SETTLE_TAU disetel via GUI. Default di Calib.cpp.
+//  Profil medan (tangga/crouch) tetap diatur runtime via setProfile (Hexapod.cpp).
 // ---------------------------------------------------------------------
-#define GAIT_STEP_HEIGHT  40.0f    // mm, tinggi angkat kaki
-#define GAIT_STEP_LENGTH  60.0f    // mm, panjang langkah penuh
-#define GAIT_CYCLE_TIME   900.0f   // ms, 1 siklus penuh
-#define GAIT_DUTY         0.5f     // fraksi waktu kaki menapak (tripod=0.5)
-
-// Kehalusan gerak (berbasis waktu, tidak tergantung kecepatan loop):
-#define GAIT_SLEW_RATE    3.0f     // unit/detik, ramp vx/vy/yaw (start/stop mulus)
-#define GAIT_PROFILE_TAU  0.25f    // detik, transisi profil medan (datar<->tangga<->narrow)
-#define GAIT_SETTLE_TAU   0.10f    // detik, kaki kembali ke home saat berhenti
 
 // ---------------------------------------------------------------------
 //  LENGAN / GRIPPER (untuk ambil korban)
@@ -116,12 +101,8 @@ const int16_t SERVO_TRIM_US[NUM_SERVOS] = {
 // Dua lengan: kanan di driver 0, kiri di driver 1 (base, shoulder, gripper).
 const uint8_t ARM_PIN_MAP_R[ARM_NUM_SERVOS][2] = { {0, 12}, {0, 13}, {0, 14} };
 const uint8_t ARM_PIN_MAP_L[ARM_NUM_SERVOS][2] = { {1, 12}, {1, 13}, {1, 14} };
-// Pose: {base, shoulder, gripper}
-const float ARM_POSE_PARK[ARM_NUM_SERVOS]  = { 90,  30,  20 };  // lipat aman
-const float ARM_POSE_REACH[ARM_NUM_SERVOS] = { 90, 150,  70 };  // julur, capit buka
-const float ARM_POSE_GRIP[ARM_NUM_SERVOS]  = { 90, 150,  10 };  // capit tutup
-const float ARM_POSE_LIFT[ARM_NUM_SERVOS]  = { 90,  60,  10 };  // angkat korban
-const float ARM_POSE_DROP[ARM_NUM_SERVOS]  = { 90, 120,  70 };  // taruh di safe zone
+// Pose lengan {base, shoulder, gripper} -> RUNTIME (Calib.h). Default di Calib.cpp.
+// ARM_POSE_* kini pointer ke gParam (macro redirect); disetel via GUI tuner.
 
 // ---------------------------------------------------------------------
 //  BUS I2C — SATU jalur (sesuai PCB: 1x SDA/SCL untuk semua device).
@@ -160,20 +141,10 @@ const float ARM_POSE_DROP[ARM_NUM_SERVOS]  = { 90, 120,  70 };  // taruh di safe
 // ---------------------------------------------------------------------
 //  NAVIGASI (closed-loop)
 // ---------------------------------------------------------------------
-#define HEADING_KP        0.020f   // gain belok per derajat error heading
-#define HEADING_KD        0.004f   // TUNE: redam osilasi heading (per deg/s)
-#define HEADING_TOL_DEG   3.0f     // toleransi heading dianggap "lurus"
-#define WALL_SETPOINT_CM  13       // jarak target ke dinding (cm)
-#define WALL_KP           0.030f   // gain koreksi wall-follow
-#define WALL_KD           0.010f   // TUNE: redam zig-zag wall-follow (per cm/s)
-#define FRONT_STOP_CM     20       // berhenti/belok bila depan < ini
-#define NAV_FWD_SPEED     0.8f     // kecepatan maju normal (0..1)
-
-// Arah mata angin (derajat kompas 0..360) -- kalibrasi di arena.
-#define HEAD_UTARA    0.0f
-#define HEAD_TIMUR   90.0f
-#define HEAD_SELATAN 180.0f
-#define HEAD_BARAT   270.0f
+// HEADING_KP/KD, WALL_KP/KD, WALL_SETPOINT_CM, HEAD_* -> RUNTIME (Calib.h, GUI).
+#define HEADING_TOL_DEG   3.0f     // toleransi heading dianggap "lurus" (const)
+#define FRONT_STOP_CM     20       // berhenti/belok bila depan < ini (const)
+#define NAV_FWD_SPEED     0.8f     // kecepatan maju normal (0..1) (const)
 
 // ---------------------------------------------------------------------
 //  PIN LAIN
@@ -181,10 +152,9 @@ const float ARM_POSE_DROP[ARM_NUM_SERVOS]  = { 90, 120,  70 };  // taruh di safe
 #define PIN_BUTTON_START  30   // tombol mulai (INPUT_PULLUP)
 #define PIN_LED_FOUND     13   // LED tanda korban ditemukan (cek aturan lomba)
 
-// Stabilisasi badan (IMU)
-#define STAB_MAX_DEG      15.0f   // clamp koreksi roll/pitch
-#define STAB_DEADBAND_DEG 1.0f    // abaikan getaran kecil
-#define STAB_TAU          0.08f   // detik, konstanta waktu low-pass (berbasis dt)
+// Stabilisasi badan (IMU). STAB_TAU & tanda koreksi (STAB_SIGN_*) -> RUNTIME (Calib.h).
+#define STAB_MAX_DEG      15.0f   // clamp koreksi roll/pitch (const)
+#define STAB_DEADBAND_DEG 1.0f    // abaikan getaran kecil (const)
 
 // Refresh servo (knob hardware). RDS3235 digital sering sanggup > 50 Hz.
 // Naikkan untuk micro-motion lebih halus; turunkan bila servo panas/getar.

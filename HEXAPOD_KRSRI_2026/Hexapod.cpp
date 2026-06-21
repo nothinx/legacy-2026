@@ -49,6 +49,11 @@ void Hexapod::setStabilization(float rollDeg, float pitchDeg) {
 
 void Hexapod::setBodyTranslation(float x, float y, float z) { _trans = {x, y, z}; }
 
+void Hexapod::jog(uint8_t tuneId, uint16_t pulseUs) {
+    if (tuneId >= NUM_TUNE_SERVOS) return;
+    _servos.writeRaw(TUNE_PIN_MAP[tuneId][0], TUNE_PIN_MAP[tuneId][1], pulseUs);
+}
+
 void Hexapod::profileFlat() {
     _gait.setProfile({ GAIT_STEP_HEIGHT, GAIT_STEP_LENGTH, GAIT_CYCLE_TIME, STAND_HEIGHT });
 }

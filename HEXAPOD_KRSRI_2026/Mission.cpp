@@ -48,6 +48,10 @@ void Mission::update() {
     float dt = (_lastT == 0) ? 0.0f : (now - _lastT) * 0.001f;  // detik; dt=0 -> D=0
     _lastT = now;
 
+    // Ambil gain PID dari kalibrasi runtime (tuning live via GUI berlaku tanpa restart).
+    _headPid.kp = HEADING_KP; _headPid.kd = HEADING_KD;
+    _wallPid.kp = WALL_KP;    _wallPid.kd = WALL_KD;
+
     float yaw  = _imu->yawDeg();
     int front  = _l->getDistance(LIDAR_FRONT);
     int right  = _l->getDistance(LIDAR_RIGHT);

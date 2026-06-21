@@ -6,7 +6,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
-#include "config.h"
+#include "Calib.h"   // SERVO_PULSE_MIN/MAX runtime
 
 #define PCA9685_0_ADDR 0x40
 #define PCA9685_1_ADDR 0x41

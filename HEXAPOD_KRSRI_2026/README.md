@@ -96,17 +96,34 @@ Pilih board *Teensy 4.1*, CPU 600MHz, lalu Upload.
 
 Lakukan berurutan. Ini bagian terpenting — robot rapi/oleng ditentukan di sini.
 
+### 5.0 GUI Tuner (laptop) — setel tanpa recompile
+Kalibrasi servo + knob gerak kini **runtime**, disetel dari laptop & disimpan di **EEPROM**
+(robot ingat saat hari-H, laptop boleh dicabut). Default ada di tabel `PARAM_DEFS` (`Calib.cpp`).
+
+1. Sambungkan Teensy via USB. Buka **`hexapod_tuner.html`** di **Chrome/Edge** (Web Serial;
+   browser lain tak didukung). Tak perlu instal apa pun.
+2. Klik **Connect** → pilih port Teensy. GUI otomatis kirim `MODE TUNE` + `DUMP` dan
+   menampilkan slider: jog 24 servo, kalibrasi 18 servo kaki, dan semua knob gerak/pose lengan.
+3. Selama mode TUNE: misi & gait disuspend; robot berdiri di pose HOME (kecuali saat jog).
+4. **Pasang horn**: klik **Netral 1500** pada servo terkait → pasang horn lurus → lepas.
+5. Setel **offset/trim/invert** tiap sendi sampai HOME rapi (klik **HOME** untuk melihat efek live).
+6. Setel knob wall/PID/gait/heading/pose lengan via slider (berlaku live).
+7. Klik **SAVE → EEPROM**. Klik **MODE RUN (keluar)** untuk lanjut misi.
+   Tombol **LOAD** (batalkan perubahan belum disimpan), **DEFAULTS** (kembali ke pabrik).
+
+Sub-bab di bawah menjelaskan APA yang disetel; lakukan semuanya lewat GUI di atas.
+
 ### 5.1 Dimensi & geometri
 Ukur `COXA/FEMUR/TIBIA_LENGTH`, `BODY_LEG_ORIGINS`, `BODY_LEG_ANGLE`, `STAND_HEIGHT`,
 `STAND_RADIUS` di `config.h` sesuai robot fisik.
 
-### 5.2 Servo netral (paling penting)
-1. Upload firmware → servo ke pose HOME otomatis.
-2. Untuk tiap servo yang tidak lurus, setel **`SERVO_OFFSET[i]`** (derajat) sampai
-   sendi pas di posisi netral mekanik. Halus pakai **`SERVO_TRIM_US[i]`**.
-3. Jika sendi bergerak ke arah berlawanan, balik **`SERVO_INVERT[i]`**.
-4. `SERVO_PULSE_MIN/MAX`: sesuaikan dengan datasheet servo (banyak digital servo
-   500–2500µs = ~180°/270°). Salah di sini = sudut tidak akurat.
+### 5.2 Servo netral (paling penting) — via GUI §5.0
+1. Mode TUNE → robot di pose HOME. (`pulse.min/max` sesuaikan datasheet servo dulu.)
+2. Untuk tiap servo tak lurus, geser **offset** (derajat) sampai sendi pas netral mekanik;
+   haluskan dengan **trim** (µs).
+3. Jika sendi bergerak berlawanan, centang **invert**.
+4. `pulse.min/max`: banyak digital servo 500–2500µs = ~180°. Salah di sini = sudut tak akurat.
+5. **SAVE** setelah rapi.
 
 ### 5.3 IK
 Sudah diverifikasi matematis (`test/`). Jika kaki "terbalik" arah tekuk, itu soal
@@ -114,17 +131,18 @@ Sudah diverifikasi matematis (`test/`). Jika kaki "terbalik" arah tekuk, itu soa
 
 ### 5.4 IMU / stabilisasi
 - Letakkan robot datar, pastikan `imu.rollDeg()/pitchDeg()` ≈ 0.
-- Jika badan justru makin miring saat distabilkan, **balik tanda** di `.ino`:
-  `robot.setStabilization(-imu.rollDeg(), -imu.pitchDeg());`
-- Atur `STAB_DEADBAND_DEG`, `STAB_MAX_DEG`, `STAB_TAU` (low-pass berbasis dt) di `config.h`.
+- Jika badan justru makin miring saat distabilkan, **balik tanda** via GUI: knob
+  `stab.sign_roll` / `stab.sign_pitch` (default −1, ubah ke +1). `stab.tau` = low-pass.
+- `STAB_DEADBAND_DEG`, `STAB_MAX_DEG` tetap di `config.h` (jarang diubah).
 
 ### 5.5 Kompas (yaw)
-Catat nilai `imu.yawDeg()` saat robot menghadap tiap arah arena, isi ke
-`HEAD_UTARA/TIMUR/SELATAN/BARAT`. (Arah arena belum tentu = mata angin asli.)
+Catat `imu.yawDeg()` saat robot menghadap tiap arah arena, isi knob GUI
+`head.utara/timur/selatan/barat`. (Arah arena belum tentu = mata angin asli.)
 
 ### 5.6 Lidar & wall-follow
-Atur `WALL_SETPOINT_CM` (jarak ideal ke dinding), `WALL_KP`, `FRONT_STOP_CM`,
-`HEADING_KP`. Mulai gain kecil, naikkan sampai responsif tanpa berosilasi.
+Setel knob GUI `wall.setpoint` (jarak ideal ke dinding), `wall.kp`/`wall.kd`,
+`heading.kp`/`heading.kd`. Mulai gain kecil, naikkan sampai responsif tanpa berosilasi;
+`*.kd` meredam zig-zag (nav sudah PD). `FRONT_STOP_CM` tetap di `config.h`.
 
 ---
 
@@ -194,6 +212,8 @@ Pakai `Serial` print `mission.state()` untuk debug di lapangan.
 
 `test/test_kinematics.cpp` memverifikasi IK (round-trip ke FK). Lihat `test/run_test.md`.
 Jalankan ulang setiap kali mengubah `LegIK.cpp` sebelum upload.
+`test/test_pid.cpp` menguji kontroler PD nav; `test/test_calib.cpp` menguji kalibrasi runtime
+(tabel default, CRC, round-trip EEPROM, clamp). EEPROM di-stub otomatis saat dikompilasi di PC.
 
 ---
 
@@ -202,8 +222,11 @@ Jalankan ulang setiap kali mengubah `LegIK.cpp` sebelum upload.
 | File | Isi |
 |---|---|
 | `HEXAPOD_KRSRI_2026.ino` | main loop |
-| `config.h` | semua kalibrasi & konstanta |
-| `types.h` | Vec3, math helper, rotatePoint (murni) |
+| `config.h` | konstanta tetap (geometri, pin, sensor) |
+| `Calib.{h,cpp}` | kalibrasi runtime + EEPROM; redireksi nama lama → tunable |
+| `SerialTuner.{h,cpp}` | parser serial mode TUNE (untuk GUI) |
+| `hexapod_tuner.html` | GUI laptop (Web Serial) setel servo + knob, simpan EEPROM |
+| `types.h` | Vec3, math helper, rotatePoint, Pid (murni) |
 | `LegIK.{h,cpp}` | inverse kinematics 1 kaki (murni, teruji) |
 | `HexaServos.{h,cpp}` | driver PCA9685, kaki non-blocking 50Hz |
 | `HexaGait.{h,cpp}` | tripod gait + yaw + profil medan |

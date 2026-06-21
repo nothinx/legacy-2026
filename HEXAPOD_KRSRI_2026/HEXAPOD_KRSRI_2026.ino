@@ -9,11 +9,13 @@
 #include "Imu.h"
 #include "LidarArray.h"
 #include "Mission.h"
+#include "SerialTuner.h"
 
 Hexapod    robot;
 Imu        imu;
 LidarArray lidar;
 Mission    mission(&robot, &imu, &lidar);
+SerialTuner tuner(&robot);
 
 bool started = false;
 
@@ -23,6 +25,7 @@ void setup() {
     pinMode(PIN_LED_FOUND, OUTPUT);
 
     Serial.println("Booting Hexapod KRSRI 2026...");
+    Calib::begin();            // muat kalibrasi EEPROM SEBELUM servo dipakai
     robot.begin();
     imu.begin();
     if (!lidar.begin()) Serial.println("WARNING: ada sensor lidar gagal init");
@@ -44,8 +47,12 @@ void loop() {
     imu.update();
     lidar.update();
 
-    // 2) Stabilisasi badan (lawan kemiringan). Sign bisa dibalik saat tuning.
-    robot.setStabilization(-imu.rollDeg(), -imu.pitchDeg());
+    // 1b) Mode tuning (GUI). Bila aktif: misi/stabilisasi disuspend, tuner pegang servo.
+    if (tuner.update()) return;
+
+    // 2) Stabilisasi badan (lawan kemiringan). Tanda koreksi = knob runtime (STAB_SIGN_*).
+    robot.setStabilization(gParam[K_STAB_SIGN_ROLL]  * imu.rollDeg(),
+                           gParam[K_STAB_SIGN_PITCH] * imu.pitchDeg());
 
     // 3) Trigger misi
     if (!started && digitalRead(PIN_BUTTON_START) == LOW) {

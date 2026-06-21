@@ -3,7 +3,7 @@
 
 // Fasad: SATU-SATUNYA class yang dipakai di .ino & misi.
 // Mengurus: gait -> body transform -> IK per kaki -> pulse servo (terkalibrasi).
-#include "config.h"
+#include "Calib.h"   // config.h + kalibrasi runtime
 #include "types.h"
 #include "HexaServos.h"
 #include "HexaGait.h"
@@ -35,6 +35,9 @@ public:
     HexaArm* armRight() { return &_armR; }
     HexaArm* armLeft()  { return &_armL; }
     HexaArm* arm()      { return &_armR; }  // default = kanan
+
+    // Tuner: gerak mentah 1 servo (id 0..NUM_TUNE_SERVOS-1, lihat TUNE_PIN_MAP). Langsung, tanpa gait.
+    void jog(uint8_t tuneId, uint16_t pulseUs);
 
 private:
     HexaServos _servos;
