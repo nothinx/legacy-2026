@@ -161,9 +161,11 @@ const float ARM_POSE_DROP[ARM_NUM_SERVOS]  = { 90, 120,  70 };  // taruh di safe
 //  NAVIGASI (closed-loop)
 // ---------------------------------------------------------------------
 #define HEADING_KP        0.020f   // gain belok per derajat error heading
+#define HEADING_KD        0.004f   // TUNE: redam osilasi heading (per deg/s)
 #define HEADING_TOL_DEG   3.0f     // toleransi heading dianggap "lurus"
 #define WALL_SETPOINT_CM  13       // jarak target ke dinding (cm)
 #define WALL_KP           0.030f   // gain koreksi wall-follow
+#define WALL_KD           0.010f   // TUNE: redam zig-zag wall-follow (per cm/s)
 #define FRONT_STOP_CM     20       // berhenti/belok bila depan < ini
 #define NAV_FWD_SPEED     0.8f     // kecepatan maju normal (0..1)
 

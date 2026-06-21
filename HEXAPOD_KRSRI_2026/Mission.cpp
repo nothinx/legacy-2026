@@ -9,13 +9,14 @@ static const uint32_t STATE_TIMEOUT = 25000; // ms, recovery bila tersangkut
 
 Mission::Mission(Hexapod* robot, Imu* imu, LidarArray* lidar)
     : _r(robot), _imu(imu), _l(lidar) {
-    _state = M_IDLE; _stateT0 = 0; _subStep = 0;
+    _state = M_IDLE; _stateT0 = 0; _lastT = 0; _subStep = 0;
 }
 
 void Mission::start() { enter(M_TO_VICTIM1); }
 
 void Mission::enter(MissionState s) {
     _state = s; _stateT0 = millis(); _subStep = 0;
+    _headPid.reset(); _wallPid.reset();   // target lompat antar-state -> reset D
     _r->stop();
 }
 
@@ -43,6 +44,10 @@ static bool runDrop(Hexapod* r, int& step, HexaArm* a) {
 }
 
 void Mission::update() {
+    uint32_t now = millis();
+    float dt = (_lastT == 0) ? 0.0f : (now - _lastT) * 0.001f;  // detik; dt=0 -> D=0
+    _lastT = now;
+
     float yaw  = _imu->yawDeg();
     int front  = _l->getDistance(LIDAR_FRONT);
     int right  = _l->getDistance(LIDAR_RIGHT);
@@ -64,7 +69,7 @@ void Mission::update() {
             break;
 
         case M_TO_VICTIM1:
-            apply(Nav::followWallRight(yaw, HEAD_UTARA, front, right));
+            apply(Nav::followWallRight(_headPid, _wallPid, yaw, HEAD_UTARA, front, right, dt));
             if (front >= 0 && front <= VICTIM_REACH_CM) enter(M_PICK_VICTIM1);
             break;
 
@@ -73,7 +78,7 @@ void Mission::update() {
             break;
 
         case M_TO_SZ1:
-            apply(Nav::followWallRight(yaw, HEAD_BARAT, front, right));
+            apply(Nav::followWallRight(_headPid, _wallPid, yaw, HEAD_BARAT, front, right, dt));
             if (front >= 0 && front <= SZ_REACH_CM) enter(M_DROP_SZ1);
             break;
 
@@ -82,7 +87,7 @@ void Mission::update() {
             break;
 
         case M_TO_VICTIM2:
-            apply(Nav::followWallRight(yaw, HEAD_SELATAN, front, right));
+            apply(Nav::followWallRight(_headPid, _wallPid, yaw, HEAD_SELATAN, front, right, dt));
             if (front >= 0 && front <= VICTIM_REACH_CM) enter(M_PICK_VICTIM2);
             break;
 
@@ -91,18 +96,18 @@ void Mission::update() {
             break;
 
         case M_TO_SZ2:
-            apply(Nav::followWallRight(yaw, HEAD_TIMUR, front, right));
+            apply(Nav::followWallRight(_headPid, _wallPid, yaw, HEAD_TIMUR, front, right, dt));
             if (front >= 0 && front <= SZ_REACH_CM) { runDrop(_r, _subStep, _r->arm()); enter(M_TO_STAIRS); }
             break;
 
         case M_TO_STAIRS:
-            apply(Nav::followWallRight(yaw, HEAD_SELATAN, front, right));
+            apply(Nav::followWallRight(_headPid, _wallPid, yaw, HEAD_SELATAN, front, right, dt));
             if (front >= 0 && front <= STAIR_REACH_CM) enter(M_CLIMB_STAIRS);
             break;
 
         case M_CLIMB_STAIRS:
             _r->profileStairs();
-            apply(Nav::goStraight(yaw, HEAD_SELATAN));
+            apply(Nav::goStraight(_headPid, yaw, HEAD_SELATAN, dt));
             // selesai naik bila pitch kembali ~datar setelah sempat menanjak (TUNE),
             // atau lidar depan terbuka lagi.
             if (elapsed() > 8000 && front > 40) { _r->profileFlat(); enter(M_DONE); }

@@ -15,11 +15,10 @@ settle dt-based, stabilisasi low-pass dt-based, refresh servo jadi knob, **filte
 
 ## YANG MASIH KURANG (urut prioritas)
 
-### 1. Nav P→PD (TINGGI)
-`Navigation.h` masih murni-P (`HEADING_KP`, `WALL_KP`) → wall-follow zig-zag/oscillate.
-- Buat struct `Pid{ float kp,kd,prev; float step(err,dt){ d=(err-prev)/dt; prev=err; return kp*err+kd*d; } }`.
-- `Mission` punya 2 instance (heading, wall) + hitung dt dari millis.
-- Ganti suku P di `followWallRight/Left`+`holdHeading` jadi PD. Hindari I (windup). Tambah `HEADING_KD`,`WALL_KD` di config.
+### 1. Nav P→PD ✅ SELESAI (math diverifikasi via Python)
+`Pid{kp,kd,prev,has; step(err,dt); reset()}` di `types.h` (pure, host-test).
+`Mission` punya `_headPid`/`_wallPid` + hitung `dt` dari millis; reset PD tiap `enter()` (cegah lonjakan D saat target lompat). `followWall*` reset PD saat depan mentok. Knob baru: `HEADING_KD=0.004`, `WALL_KD=0.010` (TUNE). Test: `test/test_pid.cpp` (butuh g++).
+⚠️ BELUM diverifikasi compiler Teensyduino — compile dulu di Arduino IDE.
 
 ### 2. Fail-safe daya + watchdog (TINGGI)
 - **Battery monitor**: butuh spesifik hardware (jumlah sel LiPo, rasio divider tegangan, pin ADC). Tanya user. Lalu: baca ADC→low-pass→histeresis; bila < ambang → `robot.stop()` + LED + print. Knob: `PIN_BATT`, `BATT_DIVIDER`, `BATT_MIN_V`.

@@ -32,6 +32,20 @@ inline float angleDiffDeg(float target, float current) {
     return d;
 }
 
+// Kontroler PD (tanpa I: hindari windup pada wall-follow/heading).
+// step() butuh dt (detik) dari pemanggil; reset() saat target lompat (ganti state).
+struct Pid {
+    float kp, kd;
+    float prev = 0.0f;
+    bool  has  = false;            // belum ada sampel sebelumnya -> D=0
+    float step(float err, float dt) {
+        float d = (has && dt > 1e-4f) ? (err - prev) / dt : 0.0f;
+        prev = err; has = true;
+        return kp * err + kd * d;
+    }
+    void reset() { has = false; prev = 0.0f; }
+};
+
 // Rotasi titik oleh roll(X), pitch(Y), yaw(Z) dalam radian.
 // Urutan: Rz * Ry * Rx (intrinsic). Dipakai untuk body kinematics.
 // ponytail: rotasi titik langsung, bukan bangun matriks 4x4 + CMSIS-DSP.

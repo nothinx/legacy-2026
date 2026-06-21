@@ -9,12 +9,12 @@
 
 struct NavCmd { float forward, strafe, turn; };
 
+// Kontroler PD (heading & wall) dimiliki Mission; dt (detik) dihitung dari millis.
 namespace Nav {
 
     // Belok di tempat menuju heading target (derajat kompas).
-    inline NavCmd holdHeading(float yawNow, float yawTarget) {
-        float err = angleDiffDeg(yawTarget, yawNow);
-        float turn = clampf(HEADING_KP * err, -1.0f, 1.0f);
+    inline NavCmd holdHeading(Pid& head, float yawNow, float yawTarget, float dt) {
+        float turn = clampf(head.step(angleDiffDeg(yawTarget, yawNow), dt), -1.0f, 1.0f);
         return { 0.0f, 0.0f, turn };
     }
     inline bool atHeading(float yawNow, float yawTarget) {
@@ -22,30 +22,36 @@ namespace Nav {
     }
 
     // Maju sambil ikut dinding KANAN, jaga heading. front/right dalam cm.
-    inline NavCmd followWallRight(float yawNow, float yawTarget, int frontCm, int rightCm) {
-        if (frontCm >= 0 && frontCm < FRONT_STOP_CM)
+    inline NavCmd followWallRight(Pid& head, Pid& wall, float yawNow, float yawTarget,
+                                  int frontCm, int rightCm, float dt) {
+        if (frontCm >= 0 && frontCm < FRONT_STOP_CM) {
+            head.reset(); wall.reset();                  // hindari lonjakan D saat resume
             return { 0.0f, 0.0f, 0.6f };                 // depan mentok -> putar kiri
-        float head = HEADING_KP * angleDiffDeg(yawTarget, yawNow);
+        }
+        float h = head.step(angleDiffDeg(yawTarget, yawNow), dt);
         // turn>0 = CCW(kiri). Terlalu jauh dari dinding kanan -> belok kanan (turn<0).
-        float wall = (rightCm >= 0) ? -WALL_KP * (float)(rightCm - WALL_SETPOINT_CM) : 0.0f;
-        float turn = clampf(head + wall, -1.0f, 1.0f);
+        float w = (rightCm >= 0) ? -wall.step((float)(rightCm - WALL_SETPOINT_CM), dt) : 0.0f;
+        float turn = clampf(h + w, -1.0f, 1.0f);
         return { NAV_FWD_SPEED, 0.0f, turn };
     }
 
     // Maju sambil ikut dinding KIRI.
-    inline NavCmd followWallLeft(float yawNow, float yawTarget, int frontCm, int leftCm) {
-        if (frontCm >= 0 && frontCm < FRONT_STOP_CM)
+    inline NavCmd followWallLeft(Pid& head, Pid& wall, float yawNow, float yawTarget,
+                                 int frontCm, int leftCm, float dt) {
+        if (frontCm >= 0 && frontCm < FRONT_STOP_CM) {
+            head.reset(); wall.reset();
             return { 0.0f, 0.0f, -0.6f };                // depan mentok -> putar kanan
-        float head = HEADING_KP * angleDiffDeg(yawTarget, yawNow);
+        }
+        float h = head.step(angleDiffDeg(yawTarget, yawNow), dt);
         // Terlalu jauh dari dinding kiri -> belok kiri (turn>0).
-        float wall = (leftCm >= 0) ? WALL_KP * (float)(leftCm - WALL_SETPOINT_CM) : 0.0f;
-        float turn = clampf(head + wall, -1.0f, 1.0f);
+        float w = (leftCm >= 0) ? wall.step((float)(leftCm - WALL_SETPOINT_CM), dt) : 0.0f;
+        float turn = clampf(h + w, -1.0f, 1.0f);
         return { NAV_FWD_SPEED, 0.0f, turn };
     }
 
     // Maju lurus jaga heading saja (tanpa dinding).
-    inline NavCmd goStraight(float yawNow, float yawTarget) {
-        float turn = clampf(HEADING_KP * angleDiffDeg(yawTarget, yawNow), -1.0f, 1.0f);
+    inline NavCmd goStraight(Pid& head, float yawNow, float yawTarget, float dt) {
+        float turn = clampf(head.step(angleDiffDeg(yawTarget, yawNow), dt), -1.0f, 1.0f);
         return { NAV_FWD_SPEED, 0.0f, turn };
     }
 }

@@ -11,6 +11,7 @@
 #include "Hexapod.h"
 #include "Imu.h"
 #include "LidarArray.h"
+#include "Navigation.h"   // Pid + NavCmd
 
 enum MissionState {
     M_IDLE,            // tunggu tombol
@@ -37,11 +38,14 @@ private:
     Hexapod* _r; Imu* _imu; LidarArray* _l;
     MissionState _state;
     uint32_t _stateT0;             // waktu masuk state (untuk timeout)
+    uint32_t _lastT;               // untuk dt loop (PD)
     int _subStep;                  // langkah dalam sekuens lengan
+    Pid _headPid{ HEADING_KP, HEADING_KD };
+    Pid _wallPid{ WALL_KP, WALL_KD };
 
     void enter(MissionState s);
     uint32_t elapsed() const { return millis() - _stateT0; }
-    void apply(const struct NavCmd& c);
+    void apply(const NavCmd& c);
 };
 
 #endif
