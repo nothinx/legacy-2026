@@ -2,10 +2,12 @@
 #include <Arduino.h>
 
 HexaGait::HexaGait() {
-    _prof = { GAIT_STEP_HEIGHT, GAIT_STEP_LENGTH, GAIT_CYCLE_TIME, STAND_HEIGHT };
-    _vx = _vy = _vyaw = 0;
+    _prof = _tgtProf = { GAIT_STEP_HEIGHT, GAIT_STEP_LENGTH, GAIT_CYCLE_TIME, STAND_HEIGHT };
+    _tgtX = _tgtY = _tgtYaw = 0;
+    _curX = _curY = _curYaw = 0;
     _running = false;
     _cycleStart = 0;
+    _lastUpdate = 0;
 }
 
 void HexaGait::computeHome() {
@@ -21,24 +23,56 @@ void HexaGait::computeHome() {
 void HexaGait::begin() {
     computeHome();
     for (int i = 0; i < 6; i++) legTargets[i] = _footHome[i];
+    _lastUpdate = millis();
 }
 
 void HexaGait::setMoveVector(float vx, float vy, float vyaw) {
-    _vx = vx; _vy = vy; _vyaw = vyaw;
-    bool wantMove = (fabsf(vx) + fabsf(vy) + fabsf(vyaw)) > 0.001f;
-    if (wantMove && !_running) { _running = true; _cycleStart = millis(); }
-    else if (!wantMove)        { _running = false; }
+    _tgtX = vx; _tgtY = vy; _tgtYaw = vyaw;   // di-slew di update()
+}
+
+// dt detik sejak update terakhir, di-clamp agar aman saat jeda besar.
+float HexaGait::dtSeconds() {
+    unsigned long now = millis();
+    float dt = (now - _lastUpdate) / 1000.0f;
+    _lastUpdate = now;
+    return clampf(dt, 0.0f, 0.05f);
+}
+
+// ramp 'cur' menuju 'tgt' dengan laju maks (unit/detik).
+static float slew(float cur, float tgt, float rate, float dt) {
+    float step = rate * dt;
+    if (tgt > cur) return (cur + step < tgt) ? cur + step : tgt;
+    if (tgt < cur) return (cur - step > tgt) ? cur - step : tgt;
+    return tgt;
 }
 
 void HexaGait::update() {
-    computeHome();   // ikut perubahan standHeight (profil medan)
+    float dt = dtSeconds();
 
-    if (!_running) {
-        // Settle ke home (berbasis waktu via faktor tetap; cukup halus).
+    // 1) Ramp vektor gerak (start/stop/belok mulus + ease-in otomatis).
+    _curX   = slew(_curX,   _tgtX,   GAIT_SLEW_RATE, dt);
+    _curY   = slew(_curY,   _tgtY,   GAIT_SLEW_RATE, dt);
+    _curYaw = slew(_curYaw, _tgtYaw, GAIT_SLEW_RATE, dt);
+
+    // 2) Ramp profil medan (transisi datar<->tangga<->narrow tanpa lonjakan).
+    float ap = dt / (GAIT_PROFILE_TAU + dt);
+    _prof.stepHeight  = lerpf(_prof.stepHeight,  _tgtProf.stepHeight,  ap);
+    _prof.stepLength  = lerpf(_prof.stepLength,  _tgtProf.stepLength,  ap);
+    _prof.cycleTime   = lerpf(_prof.cycleTime,   _tgtProf.cycleTime,   ap);
+    _prof.standHeight = lerpf(_prof.standHeight, _tgtProf.standHeight, ap);
+
+    computeHome();
+
+    bool moving = (fabsf(_curX) + fabsf(_curY) + fabsf(_curYaw)) > 0.002f;
+    if (moving && !_running) { _running = true; _cycleStart = millis(); }
+    if (!moving) {
+        _running = false;
+        // Settle ke home, berbasis waktu (konstan tau, tak tergantung loop).
+        float as = dt / (GAIT_SETTLE_TAU + dt);
         for (int i = 0; i < 6; i++) {
-            legTargets[i].x = lerpf(legTargets[i].x, _footHome[i].x, 0.2f);
-            legTargets[i].y = lerpf(legTargets[i].y, _footHome[i].y, 0.2f);
-            legTargets[i].z = lerpf(legTargets[i].z, _footHome[i].z, 0.2f);
+            legTargets[i].x = lerpf(legTargets[i].x, _footHome[i].x, as);
+            legTargets[i].y = lerpf(legTargets[i].y, _footHome[i].y, as);
+            legTargets[i].z = lerpf(legTargets[i].z, _footHome[i].z, as);
         }
         return;
     }
@@ -54,21 +88,22 @@ void HexaGait::update() {
         // Vektor langkah per kaki (mm) = translasi + rotasi(yaw).
         // Rotasi: v = omega x r  -> (-yaw*ry, yaw*rx).
         float rx = _footHome[leg].x, ry = _footHome[leg].y;
-        float sx = (_vx + (-_vyaw * ry / 100.0f)) * _prof.stepLength;
-        float sy = (_vy + ( _vyaw * rx / 100.0f)) * _prof.stepLength;
+        float sx = (_curX + (-_curYaw * ry / 100.0f)) * _prof.stepLength;
+        float sy = (_curY + ( _curYaw * rx / 100.0f)) * _prof.stepLength;
 
         float dx, dy, dz;
         if (legPhase < GAIT_DUTY) {
-            // STANCE: dari +1/2 langkah ke -1/2 langkah (dorong badan maju), lurus.
+            // STANCE: geser lurus +1/2 -> -1/2 (dorong badan maju), kecepatan konstan.
             float s = legPhase / GAIT_DUTY;          // 0..1
-            float k = 0.5f - s;                       // +0.5 -> -0.5
+            float k = 0.5f - s;
             dx = sx * k; dy = sy * k; dz = 0.0f;
         } else {
-            // SWING: kembalikan -1/2 -> +1/2 sambil diangkat.
+            // SWING SIKLOID: kecepatan nol di liftoff & touchdown -> mendarat lembut.
             float s = (legPhase - GAIT_DUTY) / (1.0f - GAIT_DUTY); // 0..1
-            float k = -0.5f + s;                      // -0.5 -> +0.5
+            float twoPiS = 2.0f * (float)M_PI * s;
+            float k = -0.5f + (s - sinf(twoPiS) / (2.0f * (float)M_PI)); // -0.5 -> +0.5
             dx = sx * k; dy = sy * k;
-            dz = _prof.stepHeight * sinf(s * (float)M_PI);
+            dz = _prof.stepHeight * (1.0f - cosf(twoPiS)) * 0.5f;        // 0 -> peak -> 0
         }
 
         legTargets[leg].x = _footHome[leg].x + dx;

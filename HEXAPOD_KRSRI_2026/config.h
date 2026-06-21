@@ -102,6 +102,11 @@ const int16_t SERVO_TRIM_US[NUM_SERVOS] = {
 #define GAIT_CYCLE_TIME   900.0f   // ms, 1 siklus penuh
 #define GAIT_DUTY         0.5f     // fraksi waktu kaki menapak (tripod=0.5)
 
+// Kehalusan gerak (berbasis waktu, tidak tergantung kecepatan loop):
+#define GAIT_SLEW_RATE    3.0f     // unit/detik, ramp vx/vy/yaw (start/stop mulus)
+#define GAIT_PROFILE_TAU  0.25f    // detik, transisi profil medan (datar<->tangga<->narrow)
+#define GAIT_SETTLE_TAU   0.10f    // detik, kaki kembali ke home saat berhenti
+
 // ---------------------------------------------------------------------
 //  LENGAN / GRIPPER (untuk ambil korban)
 //  Default 3 servo pada driver 0 channel 12,13,14: base, shoulder, gripper.
@@ -135,6 +140,12 @@ const float ARM_POSE_DROP[ARM_NUM_SERVOS]  = { 90, 120,  70 };  // taruh di safe
 // ---------------------------------------------------------------------
 #define NUM_LIDAR        6
 #define I2C_MUX_ADDR     0x70
+#define LIDAR_EMA_ALPHA  0.4f    // bobot sampel baru (median dulu, lalu EMA)
+#define LIDAR_TIMEOUT_MS 300     // sensor dianggap mati bila tak ada data valid
+#define LIDAR_MAX_CM     400     // di atas ini dianggap tak valid
+
+// IMU
+#define IMU_MAX_YAW_JUMP 30.0f   // derajat/sample; lonjakan > ini ditolak (gangguan magnet)
 // Indeks lidar -> arti (sesuaikan pemasangan fisik)
 #define LIDAR_FRONT      0
 #define LIDAR_FRONT_R    1
@@ -171,6 +182,11 @@ const float ARM_POSE_DROP[ARM_NUM_SERVOS]  = { 90, 120,  70 };  // taruh di safe
 // Stabilisasi badan (IMU)
 #define STAB_MAX_DEG      15.0f   // clamp koreksi roll/pitch
 #define STAB_DEADBAND_DEG 1.0f    // abaikan getaran kecil
-#define STAB_SMOOTH       0.20f   // 0..1, makin kecil makin halus
+#define STAB_TAU          0.08f   // detik, konstanta waktu low-pass (berbasis dt)
+
+// Refresh servo (knob hardware). RDS3235 digital sering sanggup > 50 Hz.
+// Naikkan untuk micro-motion lebih halus; turunkan bila servo panas/getar.
+#define SERVO_PWM_FREQ    50      // Hz, frekuensi sinyal PCA9685
+#define SERVO_COMMIT_MS   20      // ms, periode kirim 18 pulse (20=50Hz, 10=100Hz)
 
 #endif

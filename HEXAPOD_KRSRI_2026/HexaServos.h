@@ -10,7 +10,7 @@
 
 #define PCA9685_0_ADDR 0x40
 #define PCA9685_1_ADDR 0x41
-#define SERVO_FREQ 50
+#define SERVO_FREQ SERVO_PWM_FREQ   // dari config.h (knob)
 
 class HexaServos {
 public:
@@ -32,7 +32,7 @@ private:
     Adafruit_PWMServoDriver _kit1 = Adafruit_PWMServoDriver(PCA9685_1_ADDR, SERVO_I2C_BUS);
     uint16_t _target[NUM_SERVOS];
     unsigned long _lastUpdate;
-    static const unsigned int UPDATE_MS = 20;
+    static const unsigned int UPDATE_MS = SERVO_COMMIT_MS;
 };
 
 #endif

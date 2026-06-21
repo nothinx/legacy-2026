@@ -116,7 +116,7 @@ Sudah diverifikasi matematis (`test/`). Jika kaki "terbalik" arah tekuk, itu soa
 - Letakkan robot datar, pastikan `imu.rollDeg()/pitchDeg()` ≈ 0.
 - Jika badan justru makin miring saat distabilkan, **balik tanda** di `.ino`:
   `robot.setStabilization(-imu.rollDeg(), -imu.pitchDeg());`
-- Atur `STAB_DEADBAND_DEG`, `STAB_MAX_DEG`, `STAB_SMOOTH` di `config.h`.
+- Atur `STAB_DEADBAND_DEG`, `STAB_MAX_DEG`, `STAB_TAU` (low-pass berbasis dt) di `config.h`.
 
 ### 5.5 Kompas (yaw)
 Catat nilai `imu.yawDeg()` saat robot menghadap tiap arah arena, isi ke

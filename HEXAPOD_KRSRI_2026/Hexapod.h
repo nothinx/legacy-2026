@@ -45,6 +45,7 @@ private:
     // Pose badan (radian, mm). Hasil smoothing.
     float _roll, _pitch, _yaw;
     Vec3  _trans;
+    uint32_t _lastStabT;   // untuk low-pass stabilisasi berbasis dt
 
     void solvePose();
     uint16_t angleToPulse(uint8_t servoID, float geoAngleDeg, float baseline);

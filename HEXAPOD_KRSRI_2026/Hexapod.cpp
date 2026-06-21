@@ -4,6 +4,7 @@
 Hexapod::Hexapod() : _armR(&_servos, ARM_PIN_MAP_R), _armL(&_servos, ARM_PIN_MAP_L) {
     _roll = _pitch = _yaw = 0.0f;
     _trans = {0, 0, 0};
+    _lastStabT = 0;
 }
 
 void Hexapod::begin() {
@@ -36,9 +37,14 @@ void Hexapod::setStabilization(float rollDeg, float pitchDeg) {
     // clamp
     rollDeg  = clampf(rollDeg,  -STAB_MAX_DEG, STAB_MAX_DEG);
     pitchDeg = clampf(pitchDeg, -STAB_MAX_DEG, STAB_MAX_DEG);
-    // smooth (low-pass) lalu simpan dalam radian
-    _roll  = lerpf(_roll,  deg2rad(rollDeg),  STAB_SMOOTH);
-    _pitch = lerpf(_pitch, deg2rad(pitchDeg), STAB_SMOOTH);
+    // low-pass berbasis dt (konstan tau -> kehalusan tak tergantung kecepatan loop)
+    uint32_t now = millis();
+    float dt = _lastStabT ? (now - _lastStabT) / 1000.0f : 0.02f;
+    _lastStabT = now;
+    dt = clampf(dt, 0.0f, 0.05f);
+    float a = dt / (STAB_TAU + dt);
+    _roll  = lerpf(_roll,  deg2rad(rollDeg),  a);
+    _pitch = lerpf(_pitch, deg2rad(pitchDeg), a);
 }
 
 void Hexapod::setBodyTranslation(float x, float y, float z) { _trans = {x, y, z}; }

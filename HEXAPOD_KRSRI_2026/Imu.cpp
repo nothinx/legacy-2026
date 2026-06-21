@@ -1,6 +1,10 @@
 #include "Imu.h"
 
-Imu::Imu() { _idx = 0; _frame = false; _roll = _pitch = _yaw = 0; }
+Imu::Imu() {
+    _idx = 0; _frame = false; _have = false;
+    _roll = _pitch = _yaw = 0;
+    _roll0 = _pitch0 = 0;
+}
 
 void Imu::begin() { IMU_SERIAL.begin(IMU_BAUD); }
 
@@ -24,7 +28,10 @@ void Imu::update() {
                     _pitch = p / 32768.0f * 180.0f;
                     float yaw = y / 32768.0f * 180.0f;
                     if (yaw < 0) yaw += 360.0f;   // 0..360 untuk kompas
-                    _yaw = yaw;
+                    // Gate lonjakan yaw (gangguan magnet) -> tolak delta tak fisik.
+                    if (!_have || fabsf(angleDiffDeg(yaw, _yaw)) <= IMU_MAX_YAW_JUMP)
+                        _yaw = yaw;
+                    _have = true;
                 }
             }
         }

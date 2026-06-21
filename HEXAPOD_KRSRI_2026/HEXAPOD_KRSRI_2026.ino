@@ -29,6 +29,13 @@ void setup() {
 
     robot.profileFlat();
     delay(1500);              // beri waktu servo ke pose home
+
+    // Tare IMU: robot harus DATAR & DIAM saat ini (baca ~500ms lalu nol-kan roll/pitch).
+    uint32_t t0 = millis();
+    while (millis() - t0 < 500) imu.update();
+    if (imu.hasData()) { imu.tare(); Serial.println("IMU tared."); }
+    else Serial.println("WARNING: IMU tak ada data (cek baud/kabel)");
+
     Serial.println("Siap. Tekan tombol START.");
 }
 
