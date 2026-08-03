@@ -260,9 +260,16 @@ void setup() {
     for (uint8_t i = 0; i < SM_SLOTS; i++) curDeg[i] = 90.0f;
 
     Serial.println(F("\n\nKALIBRASI — trim, uji IK, uji jalan"));
-    if (smLoad(map_)) Serial.println(F("mapping: dari EEPROM."));
-    else { smDefaults(map_); Serial.println(F("mapping: bawaan program.")); }
-    Serial.println(F("PWM mati. 'n' untuk mulai (topang robot)."));
+    if (smLoad(map_)) {
+        Serial.println(F("mapping: dari EEPROM."));
+        Serial.println(F("Periksa tabel di bawah. Kalau tidak cocok, "
+                         "'F' untuk muat bawaan program lalu 'W' untuk menimpanya."));
+    } else {
+        smDefaults(map_);
+        Serial.println(F("mapping: bawaan program (EEPROM kosong). 'W' untuk menyimpan."));
+    }
+    smPrint(map_);
+    Serial.println(F("\nPWM mati. 'n' untuk mulai (topang robot)."));
     printHelp();
     showKnobs();
 }

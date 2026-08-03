@@ -281,16 +281,15 @@ void setup() {
 
     Serial.println(F("\n\nSET_HOME — posisi home servo hexapod"));
     if (smLoad(map_)) {
-        Serial.println(F("mapping: dari EEPROM (hasil TES_SERVO)."));
+        Serial.println(F("mapping: dari EEPROM."));
+        Serial.println(F("Kalau tabel di bawah tidak cocok, 'F' lalu 'W' untuk "
+                         "memakai & menyimpan bawaan program."));
     } else {
         smDefaults(map_);
-        Serial.println(F("mapping: BAWAAN program (servo_map.h). "
-                         "Lengan masih dugaan; kaki sudah terverifikasi."));
+        Serial.println(F("mapping: BAWAAN program (EEPROM kosong). 'W' untuk menyimpan."));
     }
     mapOk = true;
-    uint8_t n = 0;
-    for (uint8_t i = 0; i < SM_SLOTS; i++) if (mapped(i)) n++;
-    Serial.print(F("  ")); Serial.print(n); Serial.println(F(" dari 24 slot terpetakan."));
+    smPrint(map_);
 
 #if AUTO_HOME_ON_BOOT
     Serial.print(F("\nAUTO-HOME ke NETRAL 90 der dalam "));
