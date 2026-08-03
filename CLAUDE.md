@@ -1,57 +1,140 @@
-# CLAUDE.md — Handoff / Kekurangan (lanjut besok pagi)
+# CLAUDE.md — Handoff
 
-Repo: `legacy-2026` (remote sudah ada). Firmware utama: `HEXAPOD_KRSRI_2026/`.
-Robot: hexapod Teensy 4.1, 2× PCA9685 (0x40/0x41), 6× VL53L1X via mux TCA9548A (0x70),
-IMU **Yahboom 10-axis** (WIT, UART Serial1 @921600), **2 lengan** gripper, kamera+RasPi5 (YOLOv8n→ONNX).
-I2C **1 bus** (Wire @400kHz) sesuai PCB. Konvensi sumbu: +X kanan, +Y depan, +Z atas.
+Repo: `legacy-2026`. Robot hexapod KRSRI, Teensy 4.1.
+Lomba **18–19 Sept 2026** (Robot SAR UNLIMITED/UNDIP, Semarang).
 
-## STATUS terakhir
-SUDAH selesai & terverifikasi (math): gait sikloid, slew-rate vektor gerak, ramp profil medan,
-settle dt-based, stabilisasi low-pass dt-based, refresh servo jadi knob, **filter Lidar**
-(gate RangeStatus + median-3 + EMA + timeout fail-safe), **IMU** (checksum + gate lonjakan yaw + tare roll/pitch).
+## STATUS (4 Agustus 2026)
 
-⚠️ BELUM di-commit. Langkah pertama besok: `git add -A && git commit && git push` (JANGAN pakai Co-Authored-By Claude — preferensi user).
-⚠️ BELUM diverifikasi compiler (tak ada Teensyduino di sesi ini). Compile di Arduino IDE dulu.
+**Robot sudah berjalan.** Gait tripod maju/mundur/putar terbukti jalan lewat
+`KALIBRASI/`. Pemetaan 24 servo terverifikasi fisik, 6 lidar terbaca semua.
 
-## YANG MASIH KURANG (urut prioritas)
+Yang BELUM: firmware utama `HEXAPOD_KRSRI_2026/` **tidak bisa jalan** dengan
+hardware sekarang — masih memakai library dan wiring yang salah (lihat bawah).
+Alat bringup di `TES_*`/`SET_HOME`/`KALIBRASI` yang dipakai sejauh ini.
 
-### 1. Nav P→PD ✅ SELESAI (math diverifikasi via Python)
-`Pid{kp,kd,prev,has; step(err,dt); reset()}` di `types.h` (pure, host-test).
-`Mission` punya `_headPid`/`_wallPid` + hitung `dt` dari millis; reset PD tiap `enter()` (cegah lonjakan D saat target lompat). `followWall*` reset PD saat depan mentok. Knob baru: `HEADING_KD=0.004`, `WALL_KD=0.010` (TUNE). Test: `test/test_pid.cpp` (butuh g++).
-⚠️ BELUM diverifikasi compiler Teensyduino — compile dulu di Arduino IDE.
+## PERANGKAT KERAS — fakta terukur, bukan asumsi
 
-### 2. Fail-safe daya + watchdog (TINGGI)
-- **Battery monitor**: butuh spesifik hardware (jumlah sel LiPo, rasio divider tegangan, pin ADC). Tanya user. Lalu: baca ADC→low-pass→histeresis; bila < ambang → `robot.stop()` + LED + print. Knob: `PIN_BATT`, `BATT_DIVIDER`, `BATT_MIN_V`.
-- **Watchdog**: Teensy 4.1 pakai lib `Watchdog_t4` (WDT_T4). `WDT_timings_t`; feed di loop. Reset otomatis bila hang.
+Tiga temuan yang membatalkan asumsi lama. Jangan percaya `config.h` untuk hal-hal ini.
 
-### 3. IMU lanjutan (SEDANG)
-- Rate-limit perintah sudut badan (cegah snap saat spike pitch sesaat).
-- Pertimbangkan quaternion bila roll/pitch besar (sekarang Euler, cukup utk sudut kecil).
+**1. Tiga bus I2C terpisah**, bukan satu:
 
-### 4. Mission ↔ Vision (SEDANG) — lihat `RASPI_VISION_KRSRI/README.md`
-- Tambah parser UART di `Serial2`: `VIC <state> <class> <x_norm> <area> <conf>`.
-- State `M_ALIGN_VICTIM`: pakai `x_norm` luruskan badan, dekati sampai `area` ambang, pilih `armLeft()/armRight()` sesuai sisi (`runPick` sudah parametrik lengan), hanya `class=asli`.
-- Petakan state FSM ke arena nyata (R1–R11, K1–K5, SZ1–SZ5) — lihat `berkas_lomba/ANALISIS_BERKAS.md`.
+| Bus | Pin | Isi |
+|---|---|---|
+| `Wire` | SDA 18 / SCL 19 | TCA9548A `0x70` → 6× lidar |
+| `Wire1` | SDA 17 / SCL 16 | PCA9685 `0x41` = driver 1 = **KANAN** |
+| `Wire2` | SDA 25 / SCL 24 | PCA9685 `0x40` = driver 0 = **KIRI** |
 
-### 5. Profil gait NARROW untuk R11 (TINGGI utk lolos lintasan)
-R11 hanya 30 cm; lebar robot 36,9 cm → **tidak muat** stance normal. Tambah `profileNarrow()`
-(kecilkan `STAND_RADIUS` efektif / rapatkan kaki) + state khusus R11. Verifikasi bentang kaki ≤ 28–29 cm.
+**2. `0x70` muncul di ketiga bus dan itu normal.** Di `Wire` itu mux; di
+`Wire1`/`Wire2` itu **ALL-CALL bawaan PCA9685** (`ALLCALLADR`=`0xE0` 8-bit).
+Konsekuensi: PCA9685 **tidak boleh** sebus dengan TCA9548A.
 
-### 6. Pematangan lain (RENDAH)
-- ✅ EEPROM + tuning runtime: `Calib.h/.cpp` + GUI `hexapod_tuner.html` (Web Serial) + `SerialTuner`.
-- ✅ Scheduler laju-tetap: tick `CONTROL_HZ`=100 via `elapsedMicros` + profiling `PROF` (di `.ino`).
-- ✅ Arena cermin: knob `arena.mirror` (0/1) → mirror wall-side+heading+lengan di `Mission.cpp`.
-- Telemetri serial terstruktur (state/jarak/pose/tegangan) ter-throttle (PROF sudah ada, perluas).
-- Lidar 2 lapis (R5/R10 medan berat): adaptasi pijakan via kontak kaki (arus servo/limit switch).
+**3. Lidar = VL53L0X (modul TOF200C), bukan VL53L1X.** Keduanya beralamat `0x29`
+sehingga scanner tak bisa membedakan. Library: **Pololu VL53L0X**. Jangkauan
+**~200 cm**, bukan 400.
 
-## KALIBRASI WAJIB sebelum lomba (lihat HEXAPOD_KRSRI_2026/README.md §5)
-Servo netral (`SERVO_OFFSET/INVERT/TRIM`), `SERVO_PULSE_MIN/MAX`, tare IMU, `HEAD_*` (baca yaw tiap arah arena),
-`WALL_SETPOINT_CM`/`WALL_KP`, pemasangan lidar < 10 cm (dinding arena 10 cm).
-Knob hardware: `SERVO_I2C_CLOCK` (turunkan ke 400000 bila tak stabil), `SERVO_PWM_FREQ/COMMIT_MS`,
-`GAIT_SLEW_RATE`, `STAB_TAU`, `IMU_MAX_YAW_JUMP`, `LIDAR_*`.
+**Pemetaan servo** (di `servo_map.h`, sudah jadi bawaan program):
+
+```
+drv1 0x41@Wire1 KANAN : ch8-10 K0, ch4-6 K1, ch0-2 K2, ch12-14 lengan kanan
+drv0 0x40@Wire2 KIRI  : ch8-10 K3, ch4-6 K4, ch0-2 K5, ch12-14 lengan kiri
+invert: coxa dibalik di KEENAM kaki; femur hanya sisi kanan; tibia hanya kiri
+trim  : masih 0 semua — belum disetel
+```
+
+Pose berdiri dari IK: coxa **90.00°**, femur **79.43°**, tibia **82.02°**
+(STAND_RADIUS 70, STAND_HEIGHT 100).
+
+## ALAT BRINGUP (masing-masing punya README)
+
+| Folder | Isi |
+|---|---|
+| `TES_LIDAR/` | deteksi bus, uji keaslian mux, identifikasi chip, baca semua/satu-satu |
+| `TES_SERVO/` | pemetaan servo satu per satu, invert, trim, cetak kode `config.h` |
+| `SET_HOME/` | netral 90° & pose berdiri, auto-home saat boot, uji arah per sendi |
+| `KALIBRASI/` | trim, uji kemulusan IK per kaki, gait tripod, knob kecepatan |
+
+`servo_map.h` ada di TES_SERVO, SET_HOME, KALIBRASI — **kalau diubah, salin ke
+ketiganya** (Arduino IDE tidak bisa berbagi file antar folder sketsa).
+
+---
+
+# BESOK: verifikasi semua sensor
+
+Fokus sensor saja. **Belum menyentuh algoritma** (navigasi, FSM misi, vision).
+Akhiri dengan commit + push.
+
+### 1. IMU Yahboom 10-axis — PRIORITAS UTAMA, belum pernah diuji sama sekali
+
+Satu-satunya subsistem yang sama sekali belum disentuh hardware-nya.
+Protokol WIT, frame `0x55`, `Serial1`, **921600 baud**.
+
+Buat `TES_IMU/`:
+- baca frame mentah, hitung **rasio checksum gagal** dan **frame drop/detik**
+  (921600 di kabel panjang rawan; kalau rusak, ini yang menunjukkannya)
+- tampilkan roll/pitch/yaw + accel + gyro + mag
+- tare roll/pitch; uji gate lonjakan yaw (`IMU_MAX_YAW_JUMP` 30°/sampel)
+- **uji gangguan magnet**: dekatkan servo/motor saat berjalan, lihat yaw meleset
+  berapa derajat. Ini menentukan apakah yaw bisa dipercaya untuk heading arena.
+
+### 2. Arah lidar — index → arah fisik belum dicocokkan
+
+`config.h` menyebut ch0=FRONT, 1=FRONT_R, 2=RIGHT, 3=BACK, 4=LEFT, 5=FRONT_L,
+tapi itu warisan, belum pernah diverifikasi.
+
+Pakai `TES_LIDAR` yang sudah ada: `r<n>` per channel, halangi satu sisi dengan
+tangan, catat channel mana yang berubah. Hasilnya masuk ke `config.h`.
+
+Sekalian: ukur jarak sebenarnya vs pembacaan pada 10/20/50/100 cm — cari offset
+sistematis dan jarak minimum yang masih waras.
+
+### 3. Tombol START + LED
+
+`PIN_BUTTON_START` 30 (INPUT_PULLUP), `PIN_LED_FOUND` 13. Sepele tapi belum
+pernah dites. Perlu debounce — pastikan tidak memicu ganda.
+
+### 4. Monitor baterai — BUTUH KEPUTUSAN ANDA
+
+Belum ada hardware-nya. Sebelum bisa dikerjakan, tiga hal harus ditentukan:
+
+- **jumlah sel LiPo** (3S/4S?) dan tegangan minimum aman per sel
+- **rasio pembagi tegangan** (Teensy 4.1 ADC **maks 3,3 V — tidak toleran 5 V**)
+- **pin ADC** mana yang dipakai
+
+Ini fail-safe paling penting yang belum ada: tanpa itu, tegangan drop saat 18
+servo bergerak serentak bisa me-reset Teensy di tengah lomba tanpa peringatan.
+
+### 5. UART ke Raspberry Pi 5 (`Serial2`)
+
+Uji jalur fisiknya saja, bukan vision-nya: kirim/terima frame uji, ukur baud
+yang stabil, pastikan GND tersambung. Parser `VIC ...` menyusul bersama vision.
+
+### 6. Commit + push
+
+---
+
+# SETELAH ITU (bukan besok)
+
+Port firmware ke hardware nyata — ini yang membuat `HEXAPOD_KRSRI_2026/` bisa jalan:
+
+- `LidarArray` → Pololu VL53L0X, **satu objek per channel** (Pololu menyimpan
+  `stop_variable` milik sensor itu; objek tidak boleh dipakai bergantian — jebakan halus)
+- `config.h`: 3 bus terpisah, `SERVO_PIN_MAP`/`TUNE_PIN_MAP`/`ARM_PIN_MAP_*` baru,
+  `LIDAR_MAX_CM` 400 → **200**
+- `HexaServos`: bus per-driver, bukan satu `SERVO_I2C_BUS`
+- `Calib::applyDefaults`: tabel invert & trim hasil kalibrasi
+- gate `getRangeStatus()==0` diganti: buang nilai ≥ 8000 & `timeoutOccurred()`
+
+Baru sesudah itu: algoritma (nav PD sudah ada, FSM misi ↔ arena R1–R11,
+profil gait NARROW untuk R11, watchdog, Mission ↔ Vision).
+
+**R11 celah 30 cm**: berdiri normal robot 32 cm — belum muat. Butuh
+`profileNarrow()`, target bentang ≤ 28–29 cm.
 
 ## CATATAN
-- `_ref_yahboom_imu/` (clone vendor) di-gitignore, sempat terkunci proses; boleh hapus manual.
-- Test IK host: `HEXAPOD_KRSRI_2026/test/` (butuh g++; sudah diverifikasi via Python, round-trip error 0).
-- Deadline proposal **22 Juni 2026** (hari ini) — berkas di `berkas_lomba/` (`Draf_Isi_Borang.docx`, `PROPOSAL_DRAFT.md`).
-- Lomba 18–19 Sept 2026 (Robot SAR UNLIMITED/UNDIP, Semarang).
+
+- Firmware **belum pernah lolos compiler** sejak refaktor — tidak ada
+  Teensyduino di sesi-sesi ini. Compile di Arduino IDE sebelum percaya.
+- Preferensi user: **JANGAN pakai Co-Authored-By Claude** di commit message.
+- Library: Teensyduino, Adafruit PWM Servo Driver, **VL53L0X by Pololu**.
+- Batas kecepatan servo: RDS3235 ~0,15 s/60°. Bottleneck bukan I2C
+  (18 servo @400 kHz ≈ 2,9 ms/refresh). Detail di `KALIBRASI/README.md`.
