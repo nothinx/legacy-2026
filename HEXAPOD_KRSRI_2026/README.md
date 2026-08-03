@@ -61,16 +61,37 @@ itu → turunkan `CONTROL_HZ` atau optimasi. Servo commit tetap di `SERVO_COMMIT
 ## 3. Hardware & Wiring
 
 - **MCU**: Teensy 4.1 (FPU + cepat; cocok untuk IK 6 kaki @50Hz).
-- **Bus I2C — SATU jalur** (sesuai PCB): semua di **Wire** (SDA 18 / SCL 19) @**400 kHz**:
-  2× PCA9685 + mux TCA9548A + 6× VL53L1X. Clock dibatasi 400 kHz oleh device terlambat
-  (VL53L1X & TCA9548A Fast Mode). Cukup untuk 50 Hz — lihat "Anggaran bus I2C" di bawah.
-  *(Opsi pisah bus servo→Wire1 @1 MHz hanya bila PCB di-rework; tidak perlu sekarang.)*
-- **Driver servo**: 2× PCA9685 — `0x40` (kaki kanan + lengan kanan) & `0x41` (kaki kiri + lengan kiri).
-  - Kaki: lihat `SERVO_PIN_MAP` di `config.h`.
-  - Lengan: `ARM_PIN_MAP_R` (driver0 ch 12/13/14) & `ARM_PIN_MAP_L` (driver1 ch 12/13/14) = base/shoulder/gripper.
-- **Lidar**: 6× VL53L1X di belakang mux I2C **TCA9548A** (`0x70`). Indeks → arti di `config.h`
-  (`LIDAR_FRONT`, `LIDAR_RIGHT`, dst) — **samakan dengan pemasangan fisik**. Pasang < 10 cm (dinding arena 10 cm).
-- **Pull-up I2C**: 1 bus dengan banyak device + trace PCB → pakai pull-up 2.2k–4.7k untuk integritas sinyal di 400 kHz.
+
+> ⚠️ **Wiring nyata ≠ yang tertulis di `config.h` (hasil scan I2C, Agustus 2026).**
+> PCB memakai **tiga bus terpisah**, bukan satu bus. `config.h`, `HexaServos`, dan
+> `LidarArray` **belum** disesuaikan. Lihat `../TES_LIDAR/README.md` dan
+> `../TES_SERVO/README.md`.
+
+- **Bus I2C — TIGA jalur terpisah** @**400 kHz**:
+
+  | Bus | Pin Teensy 4.1 | Isi |
+  |---|---|---|
+  | `Wire`  | SDA 18 / SCL 19 | TCA9548A `0x70` → 6× **VL53L0X** (modul TOF200C) |
+  | `Wire1` | SDA 17 / SCL 16 | PCA9685 `0x41` → **driver 1** |
+  | `Wire2` | SDA 25 / SCL 24 | PCA9685 `0x40` → **driver 0** |
+
+  Perhatikan: driver 0 (`0x40`) ada di **`Wire2`**, driver 1 (`0x41`) di **`Wire1`**.
+  Servo terpisah dari lidar → boleh dinaikkan di atas 400 kHz kalau kelak perlu.
+- **`0x70` muncul di ketiga bus — itu normal.** Di `Wire` itu mux TCA9548A; di
+  `Wire1`/`Wire2` itu **ALL-CALL address bawaan PCA9685** (`ALLCALLADR` = `0xE0`
+  8-bit = `0x70` 7-bit, aktif dari pabrik). Akibatnya PCA9685 dan TCA9548A
+  **tidak boleh disatukan dalam satu bus** kecuali ALL-CALL dimatikan lebih dulu.
+- **Driver servo**: 2× PCA9685 — `0x40` (driver 0) & `0x41` (driver 1).
+  - Peta channel → sendi: **sedang dipetakan ulang** dengan `../TES_SERVO/`;
+    `SERVO_PIN_MAP`/`TUNE_PIN_MAP`/`ARM_PIN_MAP_*` di `config.h` masih nilai lama.
+  - Lengan: `ARM_PIN_MAP_R` & `ARM_PIN_MAP_L` = base/shoulder/gripper.
+- **Lidar**: 6× **VL53L0X** (TOF200C) di belakang mux **TCA9548A** (`0x70`) pada `Wire`.
+  Jangkauan **~200 cm**, bukan 400 cm → `LIDAR_MAX_CM` perlu diubah. Indeks → arti di
+  `config.h` (`LIDAR_FRONT`, `LIDAR_RIGHT`, dst) — **samakan dengan pemasangan fisik**.
+  Pasang < 10 cm (dinding arena 10 cm).
+- **Pull-up I2C**: tiap bus butuh pull-up sendiri (2.2k–4.7k) untuk integritas sinyal di
+  400 kHz. Mux **tidak** meneruskan pull-up — tiap channel mux juga butuh sendiri
+  (modul TOF200C umumnya sudah membawa pull-up di board-nya).
 - **Wiring & perbaikan hardware** (pisah bus I2C, kendali OE, daya, proteksi): lihat **`../elektrikal/README.md`**.
 
 ### Anggaran bus I2C (kenapa 1 bus @400 kHz cukup untuk 50 Hz)
@@ -91,7 +112,8 @@ belum diperlukan sekarang.
 
 1. **Teensyduino** (board Teensy 4.1).
 2. **Adafruit PWM Servo Driver Library** (PCA9685).
-3. **SparkFun VL53L1X 4m Laser Distance Sensor** (`SparkFun_VL53L1X.h`).
+3. **VL53L0X by Pololu** (`VL53L0X.h`) — sensornya VL53L0X (TOF200C), bukan VL53L1X.
+   *(`LidarArray` masih memakai SparkFun VL53L1X; port menyusul — lihat `../TES_LIDAR/README.md`.)*
 
 Buka folder `HEXAPOD_KRSRI_2026/` di Arduino IDE (semua `.h/.cpp` + `.ino` satu folder).
 Pilih board *Teensy 4.1*, CPU 600MHz, lalu Upload.
