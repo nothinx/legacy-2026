@@ -3,7 +3,18 @@
 Sketsa berdiri sendiri untuk Teensy 4.1. Board **Teensy 4.1**, Serial Monitor
 **115200**, line ending **Newline**. Library: **Adafruit PWM Servo Driver**.
 
-IMU di `Serial1` (RX pin 0), protokol **WIT**, frame `0x55` 11 byte, **921600 baud**.
+IMU di **`Serial2`** — **RX2 pin 7**, **TX2 pin 8**. Protokol **WIT**, frame
+`0x55` 11 byte, **921600 baud**. TX IMU → pin 7 Teensy, dan **GND wajib
+tersambung** (paling sering terlupa; tanpa itu frame korup, bukan kosong).
+
+> `config.h` firmware masih menulis `IMU_SERIAL Serial1` — **salah**, harus
+> diubah ke `Serial2` saat port firmware.
+>
+> `Serial2` tadinya dicadangkan untuk Raspberry Pi 5. Pi harus pindah, dan
+> **tidak boleh** ke `Serial4` (pin 16/17 = `Wire1`) atau `Serial6`
+> (pin 25/24 = `Wire2`) karena pinnya sudah dipakai I2C. Yang bebas:
+> `Serial1` (0/1), `Serial3` (15/14), `Serial5` (21/20), `Serial7` (28/29),
+> `Serial8` (34/35).
 
 ## Pertanyaan yang dijawab alat ini
 
@@ -89,8 +100,8 @@ checksum gagal. Kalau satu byte hilang di kabel, cara itu terus salah bingkai
 dan frame berikutnya ikut hancur — terbaca sebagai "IMU rusak" padahal cuma
 salah sinkron. Di sini: checksum gagal → buang **satu** byte, coba lagi.
 
-**2. Buffer RX ditambah 2 KB.** Bawaan Teensy 64 byte = hanya **0,7 ms** data
-pada 921600 baud. Tanpa tambahan itu, jeda loop sedikit saja sudah membuat byte
+**2. Buffer RX Serial2 ditambah 2 KB.** Bawaan Teensy 64 byte = hanya **0,7 ms**
+data pada 921600 baud. Tanpa tambahan itu, jeda loop sedikit saja sudah membuat byte
 hilang, dan gejalanya persis seperti IMU berisik padahal masalahnya di sisi
 Teensy.
 

@@ -92,7 +92,13 @@ Akhiri dengan commit + push.
 
 ### 1. IMU Yahboom 10-axis — `TES_IMU/` SUDAH DIBUAT, belum dijalankan
 
-Protokol WIT, frame `0x55`, `Serial1`, **921600 baud**.
+Protokol WIT, frame `0x55`, **`Serial2` = RX2 pin 7 / TX2 pin 8**, 921600 baud.
+
+**`config.h` masih menulis `IMU_SERIAL Serial1` — salah, ubah ke `Serial2`.**
+Akibatnya `Serial2` tidak lagi tersedia untuk Raspberry Pi. Pi harus pindah,
+dan **tidak boleh** ke `Serial4` (pin 16/17 = `Wire1`) atau `Serial6`
+(pin 25/24 = `Wire2`) — pinnya bentrok dengan I2C. Yang bebas: `Serial1` (0/1),
+`Serial3` (15/14), `Serial5` (21/20), `Serial7` (28/29), `Serial8` (34/35).
 
 **Angka penentu: pergeseran yaw saat servo bergerak** (`g`, 3 fase — servo
 mati / bertenaga diam / bergerak). Bedakan:
@@ -155,7 +161,11 @@ Belum ada hardware-nya. Sebelum bisa dikerjakan, tiga hal harus ditentukan:
 Ini fail-safe paling penting yang belum ada: tanpa itu, tegangan drop saat 18
 servo bergerak serentak bisa me-reset Teensy di tengah lomba tanpa peringatan.
 
-### 5. UART ke Raspberry Pi 5 (`Serial2`)
+### 5. UART ke Raspberry Pi 5 — PORTNYA HARUS DIPILIH ULANG
+
+`Serial2` sekarang dipakai IMU. Pi belum punya port; pilih dari `Serial1` (0/1),
+`Serial3` (15/14), `Serial5` (21/20), `Serial7` (28/29), `Serial8` (34/35).
+`Serial4` dan `Serial6` **tidak boleh** — pinnya bentrok `Wire1`/`Wire2`.
 
 Uji jalur fisiknya saja, bukan vision-nya: kirim/terima frame uji, ukur baud
 yang stabil, pastikan GND tersambung. Parser `VIC ...` menyusul bersama vision.

@@ -1,6 +1,7 @@
 /* =====================================================================
    TES_IMU — kelayakan IMU Yahboom 10-axis (protokol WIT) untuk heading
-   Target : Teensy 4.1, IMU di Serial1 @ 921600, frame 0x55 11 byte
+   Target : Teensy 4.1, IMU di Serial2 (RX2 pin 7 / TX2 pin 8) @ 921600,
+            frame 0x55 11 byte
    Library: Adafruit PWM Servo Driver (untuk uji gangguan servo)
 
    PERTANYAAN YANG DIJAWAB ALAT INI
@@ -34,9 +35,13 @@
 #include "servo_map.h"
 
 // ---------------------------------------------------------------- knob
-#define IMU_SERIAL      Serial1
+// IMU di Serial2 = RX2 pin 7 / TX2 pin 8.
+// CATATAN: config.h firmware masih menulis IMU_SERIAL Serial1 — harus diubah.
+// Serial2 tadinya dicadangkan untuk Raspberry Pi; Pi harus pindah, dan TIDAK
+// boleh ke Serial4 (pin 16/17 = Wire1) atau Serial6 (pin 25/24 = Wire2).
+#define IMU_SERIAL      Serial2
 #define WIT_LEN         11       // panjang frame WIT
-#define RX_EXTRA        2048     // tambahan buffer RX Serial1 (lihat setup)
+#define RX_EXTRA        2048     // tambahan buffer RX Serial2 (lihat setup)
 #define YAW_JUMP_DEG    30.0f    // sama dengan IMU_MAX_YAW_JUMP di config.h
 
 // pose berdiri dari IK (config.h: STAND_RADIUS 70, STAND_HEIGHT 100)
@@ -445,7 +450,7 @@ static void printStat() {
 
     Serial.print(F("  VONIS: "));
     if (stOk == 0)
-        Serial.println(F("TIDAK ADA FRAME. Cek TX IMU -> RX1 (pin 0), GND tersambung, baud."));
+        Serial.println(F("TIDAK ADA FRAME. Cek TX IMU -> RX2 (pin 7), GND tersambung, baud."));
     else if (stOk + stSumBad > 0 && 100.0f * stSumBad / (stOk + stSumBad) > 1.0f)
         Serial.println(F("BANYAK FRAME KORUP — kabel terlalu panjang untuk baud ini, "
                          "atau GND buruk. Turunkan baud di IMU dan di 'b'."));
@@ -458,7 +463,7 @@ static void printStat() {
 // ============================================================ bantuan
 static void printHelp() {
     Serial.println(F("\n============= TES_IMU — kelayakan yaw ============="));
-    Serial.print  (F("IMU Serial1 @ ")); Serial.print(imuBaud);
+    Serial.print  (F("IMU Serial2 (RX2 pin 7) @ ")); Serial.print(imuBaud);
     Serial.print  (F(" | servo: "));
     Serial.println(svMode == SV_OFF ? F("MATI") : svMode == SV_HOLD ? F("DIAM") : F("GOYANG"));
     Serial.println(F(" PENGUKURAN INTI"));
@@ -487,7 +492,7 @@ void setup() {
     uint32_t t0 = millis();
     while (!Serial && millis() - t0 < 3000) { }
 
-    Serial.println(F("\n\nTES_IMU — Yahboom 10-axis (WIT) di Serial1"));
+    Serial.println(F("\n\nTES_IMU — Yahboom 10-axis (WIT) di Serial2 (RX2 pin 7 / TX2 pin 8)"));
 
     // Buffer RX bawaan Teensy 64 byte = hanya 0,7 ms data pada 921600 baud.
     // Tanpa tambahan ini, jeda loop sedikit saja sudah membuat byte hilang dan
