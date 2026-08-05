@@ -29,8 +29,20 @@ Tiga temuan yang membatalkan asumsi lama. Jangan percaya `config.h` untuk hal-ha
 Konsekuensi: PCA9685 **tidak boleh** sebus dengan TCA9548A.
 
 **3. Lidar = VL53L0X (modul TOF200C), bukan VL53L1X.** Keduanya beralamat `0x29`
-sehingga scanner tak bisa membedakan. Library: **Pololu VL53L0X**. Jangkauan
-**~200 cm**, bukan 400.
+sehingga scanner tak bisa membedakan. Library: **Pololu VL53L0X**.
+
+**Jangkauan pakai yang TERUKUR: ~100 cm, bukan 200 dan jelas bukan 400.**
+Di bawah 100 cm pembacaan terbukti stabil (5 Agustus 2026). Di atas itu sensor
+mengembalikan angka yang **meloncat-loncat tapi bukan `8190`** — inilah
+jebakannya: gate `nilai >= 8000` meloloskan sampah itu dan ia terlihat seperti
+jarak sungguhan. Firmware wajib membuang **dua-duanya**:
+
+```c
+if (mm >= 8000 || mm > LIDAR_MAX_CM * 10) -> anggap tak ada target
+```
+
+Konsekuensi ke navigasi: dinding arena baru "terlihat" pada ~1 m. Perencanaan
+belok/berhenti harus muat dalam jarak itu.
 
 **Pemetaan servo** (di `servo_map.h`, sudah jadi bawaan program):
 
@@ -52,6 +64,7 @@ Pose berdiri dari IK: coxa **90.00°**, femur **79.43°**, tibia **82.02°**
 | `TES_SERVO/` | pemetaan servo satu per satu, invert, trim, cetak kode `config.h` |
 | `SET_HOME/` | netral 90° & pose berdiri, auto-home saat boot, uji arah per sendi |
 | `KALIBRASI/` | trim, uji kemulusan IK per kaki, gait tripod, knob kecepatan |
+| `MAP_LIDAR/` | pemetaan channel mux → posisi fisik lidar, kalibrasi offset jarak, cetak kode config.h |
 
 `servo_map.h` ada di TES_SERVO, SET_HOME, KALIBRASI — **kalau diubah, salin ke
 ketiganya** (Arduino IDE tidak bisa berbagi file antar folder sketsa).
@@ -76,16 +89,32 @@ Buat `TES_IMU/`:
 - **uji gangguan magnet**: dekatkan servo/motor saat berjalan, lihat yaw meleset
   berapa derajat. Ini menentukan apakah yaw bisa dipercaya untuk heading arena.
 
-### 2. Arah lidar — index → arah fisik belum dicocokkan
+### 2. Arah lidar — pakai `MAP_LIDAR/` (sudah dibuat)
 
-`config.h` menyebut ch0=FRONT, 1=FRONT_R, 2=RIGHT, 3=BACK, 4=LEFT, 5=FRONT_L,
-tapi itu warisan, belum pernah diverifikasi.
+**Tata letak sebenarnya** (dikonfirmasi user, 5 Agustus 2026): 6 lidar =
+**depan, belakang, 2 kiri, 2 kanan**; yang samping dipasang **di celah antar
+kaki** (satu di celah kaki depan–tengah, satu di celah tengah–belakang per sisi).
 
-Pakai `TES_LIDAR` yang sudah ada: `r<n>` per channel, halangi satu sisi dengan
-tangan, catat channel mana yang berubah. Hasilnya masuk ke `config.h`.
+**Tidak ada lidar diagonal depan.** Jadi `config.h` (`FRONT_R`, `FRONT_L`,
+`RIGHT`, `LEFT`) salah, bukan cuma belum terverifikasi. Indeks baru searah jarum
+jam dari depan: 0 FRONT, 1 RIGHT_FRONT, 2 RIGHT_REAR, 3 BACK, 4 LEFT_REAR,
+5 LEFT_FRONT. Nomor channel mux **tidak** diasumsikan sama dengan nomor posisi.
 
-Sekalian: ukur jarak sebenarnya vs pembacaan pada 10/20/50/100 cm — cari offset
-sistematis dan jarak minimum yang masih waras.
+`MAP_LIDAR/` melakukan pemetaan channel→posisi lewat lambaian tangan (`w`),
+verifikasi lewat denah (`a`), kalibrasi offset jarak (`f<p>` + `c<cm>` di
+10/20/50/100 cm), simpan ke EEPROM (`e`), lalu cetak kode untuk `config.h` (`g`).
+
+**Hasil pemetaan (5 Agustus 2026)** — sudah masuk `MAP_LIDAR/lidar_map.h`:
+
+| posisi | 0 FRONT | 1 RIGHT_FRONT | 2 RIGHT_REAR | 3 BACK | 4 LEFT_REAR | 5 LEFT_FRONT |
+|---|---|---|---|---|---|---|
+| **channel mux** | 5 | 4 | 3 | 2 | 1 | 0 |
+
+Yaitu `channel = 5 − posisi`; kabel dicolok berurutan mengelilingi robot
+berlawanan arah jarum jam. Offset jarak **belum** dikalibrasi (masih 0 semua).
+
+Untung dari sepasang sensor per sisi: selisih `LEFT_FRONT − LEFT_REAR` memberi
+**sudut robot terhadap dinding** langsung — wall-following tidak perlu yaw IMU.
 
 ### 3. Tombol START + LED
 
@@ -119,10 +148,13 @@ Port firmware ke hardware nyata — ini yang membuat `HEXAPOD_KRSRI_2026/` bisa 
 - `LidarArray` → Pololu VL53L0X, **satu objek per channel** (Pololu menyimpan
   `stop_variable` milik sensor itu; objek tidak boleh dipakai bergantian — jebakan halus)
 - `config.h`: 3 bus terpisah, `SERVO_PIN_MAP`/`TUNE_PIN_MAP`/`ARM_PIN_MAP_*` baru,
-  `LIDAR_MAX_CM` 400 → **200**
+  `LIDAR_MAX_CM` 400 → **100** (terukur), indeks lidar baru + `LIDAR_CH_MAP`/`LIDAR_OFFSET_MM`
+  dari `MAP_LIDAR` (`LIDAR_FRONT_R`/`FRONT_L` dihapus — sensornya memang tidak ada,
+  jadi kode navigasi yang membacanya harus ditulis ulang)
 - `HexaServos`: bus per-driver, bukan satu `SERVO_I2C_BUS`
 - `Calib::applyDefaults`: tabel invert & trim hasil kalibrasi
-- gate `getRangeStatus()==0` diganti: buang nilai ≥ 8000 & `timeoutOccurred()`
+- gate `getRangeStatus()==0` diganti: buang nilai ≥ 8000, **nilai > `LIDAR_MAX_CM`**,
+  & `timeoutOccurred()` — yang tengah paling gampang terlupa
 
 Baru sesudah itu: algoritma (nav PD sudah ada, FSM misi ↔ arena R1–R11,
 profil gait NARROW untuk R11, watchdog, Mission ↔ Vision).
@@ -134,6 +166,11 @@ profil gait NARROW untuk R11, watchdog, Mission ↔ Vision).
 
 - Firmware **belum pernah lolos compiler** sejak refaktor — tidak ada
   Teensyduino di sesi-sesi ini. Compile di Arduino IDE sebelum percaya.
+- **Jebakan `.ino`**: Arduino IDE menyisipkan prototipe fungsi hasil generate di
+  atas badan sketsa, sebelum `struct`/`enum` buatan sendiri dideklarasikan. Tipe
+  buatan sendiri **tidak boleh muncul di tanda tangan fungsi** dalam file `.ino`
+  (`'X' does not name a type`) — taruh tipenya di file `.h`, atau ganti parameter
+  jadi `(const void*, size_t)`. Kena di `MAP_LIDAR` (`storeSum`).
 - Preferensi user: **JANGAN pakai Co-Authored-By Claude** di commit message.
 - Library: Teensyduino, Adafruit PWM Servo Driver, **VL53L0X by Pololu**.
 - Batas kecepatan servo: RDS3235 ~0,15 s/60°. Bottleneck bukan I2C
