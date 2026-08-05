@@ -31,6 +31,7 @@
 #include <EEPROM.h>
 #include <math.h>
 #include <string.h>
+#include <stddef.h>      // offsetof — checksum EEPROM kompas
 #include <Adafruit_PWMServoDriver.h>
 #include "servo_map.h"
 
@@ -109,6 +110,37 @@ static float wrap180(float d) {
 }
 
 static float magMagnitude() { return sqrtf(mhx * mhx + mhy * mhy + mhz * mhz); }
+
+// ------------------------------------------------------- kompas arena
+// Empat arah arena. BUKAN utara magnet — yang dicatat adalah yaw saat robot
+// menghadap arah arena, jadi orientasi arena terhadap medan bumi tidak perlu
+// diketahui sama sekali. Nilainya masuk ke HEAD_UTARA/TIMUR/SELATAN/BARAT
+// di Calib.h. Dideklarasikan di sini karena printBaris() memakainya.
+#define SEKTOR_MASUK    40.0f    // derajat; histeresis supaya sektor tidak berkedip
+#define SEKTOR_KELUAR   50.0f
+#define EE_KOMPAS_ADDR  1792     // peta EEPROM: 0 Calib, 1024 ServoMap, 1536 lidar
+
+static const char* const ARAH_NAMA[4] = { "UTARA", "TIMUR", "SELATAN", "BARAT" };
+float  headArah[4] = { -1, -1, -1, -1 };   // -1 = belum dicatat
+int8_t sektorKini  = -1;
+
+// Sektor dengan HISTERESIS. Tanpa ini, robot yang diam di dekat batas 45 derajat
+// akan berkedip U<->T terus-menerus dan apa pun yang bercabang di atasnya ikut
+// bergetar. Masuk sektor pada 40 derajat, baru lepas pada 50 derajat.
+static int8_t hitungSektor() {
+    int8_t best = -1; float bestErr = 999;
+    for (uint8_t i = 0; i < 4; i++) {
+        if (headArah[i] < 0) continue;
+        float e = fabsf(wrap180(yaw - headArah[i]));
+        if (e < bestErr) { bestErr = e; best = i; }
+    }
+    if (best < 0) return -1;
+    if (sektorKini < 0) { if (bestErr <= SEKTOR_MASUK) sektorKini = best; return sektorKini; }
+    if (best == sektorKini) return sektorKini;
+    float errKini = fabsf(wrap180(yaw - headArah[sektorKini]));
+    if (errKini > SEKTOR_KELUAR && bestErr <= SEKTOR_MASUK) sektorKini = best;
+    return sektorKini;
+}
 
 // ---- akumulator sudut, aman terhadap lompatan 359->1 ----
 // Semua dijumlahkan sebagai SELISIH terhadap sampel pertama, bukan sebagai
@@ -407,6 +439,11 @@ static void printBaris() {
 
     Serial.print(F("yaw ")); Serial.print(yaw, 1);
     if (yawRef >= 0) { Serial.print(F(" (rel ")); Serial.print(wrap180(yaw - yawRef), 1); Serial.print(')'); }
+    int8_t sek = hitungSektor();
+    if (sek >= 0) {
+        Serial.print(F(" [")); Serial.print(ARAH_NAMA[sek]);
+        Serial.print(' '); Serial.print(wrap180(yaw - headArah[sek]), 0); Serial.print(']');
+    }
     Serial.print(F(" | rp ")); Serial.print(roll - roll0, 1);
     Serial.print('/'); Serial.print(pitch - pitch0, 1);
     Serial.print(F(" | gyro ")); Serial.print(gz, 1);
@@ -484,6 +521,189 @@ static void printStat() {
         Serial.println(F("jalur bersih."));
 }
 
+// ========================================================== KOMPAS
+static uint8_t kompasSum(const void* buf, size_t n) {
+    const uint8_t* p = (const uint8_t*)buf;
+    uint8_t acc = 0;
+    for (size_t i = 0; i < n; i++) acc = (uint8_t)(acc + p[i] * 31 + 7);
+    return acc;
+}
+
+struct KompasStore { uint8_t m0, m1, ver; float head[4]; uint8_t sum; };
+
+static void kompasSimpan() {
+    KompasStore s;
+    memset(&s, 0, sizeof(s));
+    s.m0 = 0xC0; s.m1 = 0x3A; s.ver = 1;
+    for (uint8_t i = 0; i < 4; i++) s.head[i] = headArah[i];
+    s.sum = kompasSum(&s, offsetof(KompasStore, sum));
+    EEPROM.put(EE_KOMPAS_ADDR, s);
+    Serial.println(F("4 arah disimpan ke EEPROM."));
+}
+
+static bool kompasMuat(bool cerewet) {
+    KompasStore s;
+    EEPROM.get(EE_KOMPAS_ADDR, s);
+    if (s.m0 != 0xC0 || s.m1 != 0x3A || s.ver != 1 ||
+        s.sum != kompasSum(&s, offsetof(KompasStore, sum))) {
+        if (cerewet) Serial.println(F("EEPROM kompas kosong — 4 arah belum dicatat."));
+        return false;
+    }
+    for (uint8_t i = 0; i < 4; i++) headArah[i] = s.head[i];
+    if (cerewet) Serial.println(F("4 arah dimuat dari EEPROM."));
+    return true;
+}
+
+static void kompasCatat(uint8_t i) {
+    if (!punyaSudut) { Serial.println(F("Belum ada data sudut dari IMU.")); return; }
+    headArah[i] = yaw;
+    Serial.print(F("  ")); Serial.print(ARAH_NAMA[i]);
+    Serial.print(F(" = ")); Serial.print(yaw, 1); Serial.println(F(" derajat"));
+    Serial.println(F("  (paling presisi: sikukan robot ke dinding pakai lidar samping"));
+    Serial.println(F("   sampai LEFT_FRONT ~ LEFT_REAR, baru catat)"));
+}
+
+static void kompasTabel() {
+    Serial.println(F("\n--- KOMPAS ARENA ---"));
+    int8_t sek = hitungSektor();
+    for (uint8_t i = 0; i < 4; i++) {
+        Serial.print(F("  ")); Serial.print(i); Serial.print(F("  "));
+        Serial.print(ARAH_NAMA[i]);
+        for (uint8_t k = strlen(ARAH_NAMA[i]); k < 9; k++) Serial.print(' ');
+        if (headArah[i] < 0) { Serial.println(F("belum dicatat")); continue; }
+        Serial.print(headArah[i], 1); Serial.print(F(" der"));
+        Serial.print(F("   error sekarang ")); Serial.print(wrap180(yaw - headArah[i]), 1);
+        if (sek == (int8_t)i) Serial.print(F("   <== sektor sekarang"));
+        Serial.println();
+    }
+
+    // Cek kelinieran: kalau kompas sehat, keempatnya berjarak ~90 derajat.
+    // Menyimpang jauh = distorsi soft-iron, artinya sektor di antara keempat
+    // titik itu tidak bisa dipercaya walau keempat titiknya sendiri benar.
+    uint8_t lengkap = 0;
+    for (uint8_t i = 0; i < 4; i++) if (headArah[i] >= 0) lengkap++;
+    if (lengkap == 4) {
+        Serial.println(F("  jarak antar arah (idealnya 90):"));
+        float terburuk = 0;
+        for (uint8_t i = 0; i < 4; i++) {
+            float d = wrap180(headArah[(i + 1) % 4] - headArah[i]);
+            if (d < 0) d += 360.0f;
+            Serial.print(F("    ")); Serial.print(ARAH_NAMA[i]);
+            Serial.print(F(" -> ")); Serial.print(ARAH_NAMA[(i + 1) % 4]);
+            Serial.print(F(" = ")); Serial.print(d, 1); Serial.println(F(" der"));
+            if (fabsf(d - 90.0f) > terburuk) terburuk = fabsf(d - 90.0f);
+        }
+        Serial.print(F("  simpangan terburuk dari 90: ")); Serial.print(terburuk, 1);
+        Serial.println(F(" der"));
+        if (terburuk <= 3.0f)
+            Serial.println(F("  -> kompas LINIER. Cukup catat UTARA, sisanya bisa aritmetika."));
+        else if (terburuk <= 10.0f)
+            Serial.println(F("  -> sedikit melenceng. Pakai keempat nilai apa adanya."));
+        else
+            Serial.println(F("  -> DISTORSI SOFT-IRON besar. Keempat titik masih bisa dipakai,"
+                             " tapi sudut DI ANTARA-nya tidak linier — jangan interpolasi."));
+    } else {
+        Serial.print(F("  baru ")); Serial.print(lengkap);
+        Serial.println(F("/4 arah dicatat; cek kelinieran menunggu keempatnya."));
+    }
+}
+
+// ============================================== PIVOT — KERANGKA
+// Memutar robot di tempat sampai menghadap arah tersimpan.
+//
+// PENGGERAK GAIT-NYA BELUM ADA. gaitPutar() di bawah masih kosong, jadi robot
+// TIDAK akan bergerak sendiri. Kerangkanya sengaja dibuat lebih dulu supaya
+// lingkar kendalinya (yaw -> error -> perintah putar) bisa diuji dan disetel
+// terpisah dari gait, dan supaya jelas apa persisnya yang perlu disambungkan:
+// satu panggilan, satu argumen -1..+1.
+//
+// Sementara kosong, perintah 'o<n>' tetap berguna: putar robot DENGAN TANGAN
+// ke arah sasaran dan lihat perintah putar bergerak menuju nol. Itu memverifikasi
+// tanda (arah putar) dan perilaku PD sebelum gait disambungkan — kalau tandanya
+// terbalik, robot nanti akan berputar menjauhi sasaran.
+#define PIVOT_KP        0.020f   // perintah putar per derajat error
+#define PIVOT_KD        0.004f   // per derajat/detik (dari gyro Z, bukan turunan yaw)
+#define PIVOT_TOL_DEG   6.0f     // HEADING_TOL_DEG 3.0 di config.h terlalu ketat
+#define PIVOT_DIAM_MS   500      // harus di dalam toleransi selama ini
+#define PIVOT_BATAS_MS  20000
+
+static void gaitPutar(float turn) {
+    // TODO: sambungkan ke gait tripod.
+    //   firmware  : HexaGait::setMoveVector(0, 0, turn)
+    //   sementara : salin gait dari KALIBRASI/ ke sini
+    // turn: -1 = putar penuh satu arah, +1 = arah sebaliknya, 0 = diam.
+    (void)turn;
+}
+
+static void pivotKe(uint8_t arah) {
+    if (headArah[arah] < 0) {
+        Serial.print(ARAH_NAMA[arah]); Serial.println(F(" belum dicatat (pakai 'c<n>')."));
+        return;
+    }
+    if (!punyaSudut) { Serial.println(F("Belum ada data sudut dari IMU.")); return; }
+
+    Serial.print(F("\n--- Pivot ke ")); Serial.print(ARAH_NAMA[arah]);
+    Serial.print(F(" (")); Serial.print(headArah[arah], 1); Serial.println(F(" der) ---"));
+    Serial.println(F("  gaitPutar() masih kosong -> robot tidak bergerak sendiri."));
+    Serial.println(F("  Putar robot DENGAN TANGAN; perintah putar harus menuju nol."));
+    Serial.println(F("  Ketik apa saja = berhenti.\n"));
+
+    uint32_t t0 = millis(), lapor = 0, masukSejak = 0;
+    float    errAwal = wrap180(headArah[arah] - yaw);
+    bool     selesai = false;
+
+    while (millis() - t0 < PIVOT_BATAS_MS) {
+        witPump();
+
+        float err = wrap180(headArah[arah] - yaw);
+        // Suku D dari gyro Z langsung, bukan dari turunan yaw: yaw berisik dan
+        // mendiferensiasikannya memperbesar noise itu. gyro juga kebal magnet.
+        float turn = PIVOT_KP * err - PIVOT_KD * gz;
+        if (turn >  1.0f) turn =  1.0f;
+        if (turn < -1.0f) turn = -1.0f;
+
+        gaitPutar(turn);
+
+        if (fabsf(err) <= PIVOT_TOL_DEG) {
+            if (!masukSejak) masukSejak = millis();
+            if (millis() - masukSejak >= PIVOT_DIAM_MS) { selesai = true; break; }
+        } else {
+            masukSejak = 0;
+        }
+
+        if (millis() - lapor >= 250) {
+            lapor = millis();
+            Serial.print(F("  yaw ")); Serial.print(yaw, 1);
+            Serial.print(F("  error ")); Serial.print(err, 1);
+            Serial.print(F("  gyroZ ")); Serial.print(gz, 1);
+            Serial.print(F("  -> putar ")); Serial.print(turn, 3);
+            if (fabsf(err) <= PIVOT_TOL_DEG) Serial.print(F("  [dalam toleransi]"));
+            Serial.println();
+        }
+
+        if (Serial.available()) {
+            while (Serial.available()) Serial.read();
+            Serial.println(F("  ** dihentikan **"));
+            break;
+        }
+    }
+    gaitPutar(0);
+
+    Serial.print(F("\n  hasil: "));
+    if (selesai) {
+        Serial.print(F("SAMPAI dalam ")); Serial.print((millis() - t0) / 1000.0f, 1);
+        Serial.println(F(" detik"));
+    } else {
+        Serial.println(F("belum sampai (wajar selama gaitPutar() kosong)"));
+    }
+    Serial.print(F("  error awal ")); Serial.print(errAwal, 1);
+    Serial.print(F(" -> akhir ")); Serial.print(wrap180(headArah[arah] - yaw), 1);
+    Serial.println(F(" derajat"));
+    Serial.println(F("  Periksa TANDA: saat error positif, perintah putar harus positif juga."));
+    Serial.println(F("  Kalau terbalik, robot nanti berputar menjauhi sasaran — balik tanda"));
+    Serial.println(F("  di gaitPutar(), jangan di PIVOT_KP."));
+}
+
 // ======================================================== pindai baud
 // Perangkat WIT keluar pabrik di 9600. Daripada menebak, coba semuanya dan
 // lihat mana yang menghasilkan frame sah.
@@ -545,6 +765,11 @@ static void printHelp() {
     Serial.println(F("  g        UJI GANGGUAN SERVO 3 fase (mati/diam/gerak) <- yang menentukan"));
     Serial.println(F("  d<detik> uji hanyutan yaw saat diam (mis. d60)"));
     Serial.println(F("  f        statistik frame WIT (checksum, laju, per tipe)"));
+    Serial.println(F(" KOMPAS ARENA  (0=UTARA 1=TIMUR 2=SELATAN 3=BARAT)"));
+    Serial.println(F("  c<n>     catat yaw sekarang sebagai arah n (mis. c0)"));
+    Serial.println(F("  k        tabel 4 arah + cek kelinieran (jarak harus ~90 der)"));
+    Serial.println(F("  o<n>     PIVOT ke arah n — gaitPutar() masih kosong, lihat README"));
+    Serial.println(F("  e / E    simpan / muat 4 arah dari EEPROM"));
     Serial.println(F(" TAMPILAN"));
     Serial.println(F("  a        tampilkan data terus-menerus     x  berhenti"));
     Serial.println(F("  t        tare roll/pitch jadi nol"));
@@ -587,6 +812,7 @@ void setup() {
 
     for (uint8_t i = 0; i < NACC; i++) accReset(i);
     statReset();
+    kompasMuat(true);
 
     Serial.println(F("Servo dimatikan. 'g' = uji gangguan (kaki harus menggantung)."));
     printHelp();
@@ -615,6 +841,18 @@ static void handleCmd(char* s) {
 
         case 'g': mode = IDLE; ujiGangguan(); break;
         case 'd': mode = IDLE; ujiDrift((uint16_t)num); break;
+
+        case 'c':
+            if (d1 > 3) { Serial.println(F("c0=UTARA c1=TIMUR c2=SELATAN c3=BARAT")); break; }
+            kompasCatat(d1);
+            break;
+        case 'k': mode = IDLE; kompasTabel(); break;
+        case 'o':
+            if (d1 > 3) { Serial.println(F("o0=UTARA o1=TIMUR o2=SELATAN o3=BARAT")); break; }
+            mode = IDLE; pivotKe(d1);
+            break;
+        case 'e': kompasSimpan(); break;
+        case 'E': if (kompasMuat(true)) kompasTabel(); break;
 
         case 's':
             if (d1 > 2) { Serial.println(F("s0=mati s1=diam s2=goyang")); break; }

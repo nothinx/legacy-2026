@@ -170,10 +170,71 @@ Teensy.
 Kalau uji di sini bersih tapi firmware tetap kacau, dua hal inilah tersangka
 pertamanya.
 
+## Kompas arena & pivot
+
+Yang dicatat **bukan utara magnet** — melainkan yaw saat robot menghadap arah
+arena. Jadi orientasi arena terhadap medan bumi tidak perlu diketahui sama
+sekali, dan tiap arena baru cukup dicatat ulang.
+
+```
+c0 c1 c2 c3   catat UTARA / TIMUR / SELATAN / BARAT
+k             tabel + cek kelinieran
+e             simpan ke EEPROM (alamat 1792)
+o0..o3        pivot ke arah itu
+```
+
+**Cara mencatat yang presisi:** jangan andalkan mata. Sikukan robot ke dinding
+arena memakai lidar samping sampai `LEFT_FRONT ≈ LEFT_REAR`, baru `c<n>`.
+
+**Cek kelinieran (`k`)** melaporkan jarak antar arah berurutan; idealnya 90°.
+
+| Simpangan terburuk | Arti |
+|---|---|
+| ≤ 3° | kompas linier — cukup catat UTARA, sisanya aritmetika |
+| ≤ 10° | sedikit melenceng — pakai keempat nilai apa adanya |
+| > 10° | distorsi soft-iron besar — keempat titik masih dipakai, tapi sudut **di antara**-nya tidak linier, jangan diinterpolasi |
+
+**Sektor punya histeresis** (masuk 40°, lepas 50°). Tanpa itu robot yang diam
+di dekat batas 45° berkedip U↔T terus dan apa pun yang bercabang di atasnya ikut
+bergetar. Sektor ditampilkan di baris `a`, mis. `[UTARA -3]`.
+
+### Pivot masih kerangka
+
+`gaitPutar()` di `TES_IMU.ino` **masih kosong** — robot tidak akan bergerak
+sendiri. Kerangkanya sengaja dibuat lebih dulu supaya lingkar kendalinya
+(yaw → error → perintah putar) bisa disetel terpisah dari gait, dan supaya
+jelas apa yang perlu disambungkan: satu panggilan, satu argumen −1…+1.
+
+```c
+static void gaitPutar(float turn) {
+    // TODO: HexaGait::setMoveVector(0, 0, turn)
+    (void)turn;
+}
+```
+
+Selama masih kosong, `o<n>` tetap berguna: **putar robot dengan tangan** ke arah
+sasaran dan lihat perintah putar bergerak menuju nol. Itu memverifikasi **tanda
+arah putar** sebelum gait disambungkan — kalau tandanya terbalik, robot nanti
+akan berputar menjauhi sasaran dan itu jauh lebih sulit didiagnosa saat kaki
+sudah bergerak.
+
+Suku D-nya memakai **gyro Z langsung**, bukan turunan yaw: yaw berisik dan
+mendiferensiasikannya memperbesar noise itu, sedangkan gyro kebal magnet.
+Inilah gunanya mengaktifkan content *angular velocity* di aplikasi WIT.
+
+Toleransinya `PIVOT_TOL_DEG` **6°**, bukan `HEADING_TOL_DEG` 3° dari `config.h` —
+3° terlalu ketat untuk servo 0,15 s/60°, robot akan terus mengoreksi kecil dan
+boros waktu.
+
 ## Perintah
 
 | Perintah | Fungsi |
 |---|---|
+| **kompas arena** | |
+| `c<n>` | catat yaw sekarang sebagai arah n (0=U 1=T 2=S 3=B) |
+| `k` | tabel 4 arah + cek kelinieran |
+| `o<n>` | pivot ke arah n (gait masih placeholder) |
+| `e` / `E` | simpan / muat 4 arah dari EEPROM |
 | **pengukuran inti** | |
 | `g` | uji gangguan servo 3 fase — **yang menentukan** |
 | `d<detik>` | uji hanyutan yaw saat diam (mis. `d60`) |

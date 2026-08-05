@@ -75,6 +75,7 @@ jangan ada yang bertabrakan:
 | 0 .. ~280 | blok `Calib` firmware | `Calib.cpp` (`CALIB_ADDR 0`) |
 | 1024 .. ~1150 | `ServoMap` | `servo_map.h` (`SM_EE_ADDR 1024`) |
 | 1536 .. ~1560 | pemetaan & offset lidar | `MAP_LIDAR` (`EE_ADDR 1536`) |
+| 1792 .. ~1812 | 4 arah kompas arena | `TES_IMU` (`EE_KOMPAS_ADDR 1792`) |
 
 `MAP_LIDAR` semula memakai alamat 0 → perintah `e` menimpa kalibrasi firmware.
 Sudah diperbaiki. Kalau Teensy pernah dipakai MAP_LIDAR versi lama, blok `Calib`
@@ -90,7 +91,27 @@ ketiganya** (Arduino IDE tidak bisa berbagi file antar folder sketsa).
 Fokus sensor saja. **Belum menyentuh algoritma** (navigasi, FSM misi, vision).
 Akhiri dengan commit + push.
 
-### 1. IMU Yahboom 10-axis — `TES_IMU/` SUDAH DIBUAT, belum dijalankan
+### 1. IMU Yahboom 10-axis — SUDAH DIUJI, YAW LAYAK
+
+**Hasil uji gangguan servo (`g`, 5 Agustus 2026)** — robot di dudukan, kaki
+menggantung:
+
+| Fase | yaw | sebar | \|mag\| |
+|---|---|---|---|
+| 1 servo mati | 40,9° | 0,2° | 7268 |
+| 2 servo bertenaga diam | 38,9° | 2,2° | 7826 |
+| 3 servo bergerak | 38,6° | 1,4° | 7941 |
+
+Gangguan **statis 2,0°**, **dinamis 2,2°** dengan sebar 1,4°, `|mag|` naik 9%.
+Semuanya jauh di bawah ambang 5° → **yaw layak jadi acuan heading utama**.
+Rencana cadangan berbasis sudut dinding lidar tidak jadi diperlukan (tapi
+sepasang lidar samping tetap berguna untuk menyikukan robot saat mencatat arah).
+
+`TES_IMU` sudah punya kompas 4 arah (`c<n>` catat, `k` tabel + cek kelinieran,
+`o<n>` pivot, EEPROM 1792) dengan sektor berhisteresis 40°/50°.
+**`gaitPutar()` masih placeholder** — robot belum bergerak sendiri; `o<n>`
+dipakai dengan memutar robot manual untuk memverifikasi tanda arah putar.
+
 
 Protokol WIT, frame `0x55`, **`Serial2` = RX2 pin 7 / TX2 pin 8**.
 
