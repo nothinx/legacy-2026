@@ -52,7 +52,9 @@
 #define WIGGLE_HZ       0.7f     // frekuensi goyang saat uji gangguan
 #define SERVO_RATE_MS   20       // 50 Hz penulisan servo
 
-uint32_t imuBaud   = 9600;
+// 230400 = maksimum yang disediakan aplikasi WIT untuk modul ini.
+// Bawaan pabrik 9600 — kalau modul belum disetel, jalankan 'B' untuk memindai.
+uint32_t imuBaud   = 230400;
 float    wiggleAmp = 10.0f;      // derajat, amplitudo goyang
 uint16_t faseDetik = 8;          // lama tiap fase uji 'g'
 

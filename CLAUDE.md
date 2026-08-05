@@ -94,12 +94,22 @@ Akhiri dengan commit + push.
 
 Protokol WIT, frame `0x55`, **`Serial2` = RX2 pin 7 / TX2 pin 8**.
 
-**Baud terukur 9600, bukan 921600** (bawaan pabrik WIT) — jadi `IMU_BAUD 921600`
-di `config.h` juga salah. Rencana: naikkan ke 115200 lewat aplikasi Yahboom,
-karena di 9600 dengan 4 jenis paket aktif laju sudut mentok **~21 Hz**. Kalau
-return rate diset melebihi kapasitas baud, frame terpotong dan muncul sebagai
-checksum gagal — bukan sebagai "lambat". `TES_IMU` punya `B` (pindai baud) dan
-`f` (hitung kapasitas).
+**Setelan IMU (aplikasi WIT, 5 Agustus 2026):** baud **230400** (maks modul ini;
+bawaan pabrik 9600, jadi `IMU_BAUD 921600` di `config.h` salah), output rate
+**200 Hz**, content **4**: Euler `0x53` + angular velocity `0x52` + magnetism
+`0x54` + acceleration `0x51`. Terpakai 38% kapasitas.
+
+Rate 200 Hz dipilih karena `CONTROL_HZ` = 100 Hz: IMU 100 Hz yang tak tersinkron
+membuat sebagian tick kontrol dapat nol sampel segar. Oversampling 2× menjamin
+selalu ada yang baru.
+
+**Angular velocity wajib aktif** — gyro Z jadi suku D PD heading (tanpa
+mendiferensiasi yaw yang berisik) sekaligus **cadangan belok** kalau uji `g`
+menyatakan yaw tak layak: integrasi gyro Z cukup akurat untuk manuver 90° pendek.
+
+Kalau return rate melebihi kapasitas baud, frame terpotong → muncul sebagai
+checksum gagal, bukan "lambat". `TES_IMU` punya `B` (pindai baud) dan `f`
+(hitung kapasitas + laju sudut sebenarnya).
 
 **Kalibrasi magnetometer harus dilakukan saat IMU SUDAH TERPASANG di robot**
 (servo tanpa tenaga, putar seluruh robot). Kalibrasi di meja hanya membuang

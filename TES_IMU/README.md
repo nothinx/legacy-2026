@@ -7,9 +7,9 @@ IMU di **`Serial2`** — **RX2 pin 7**, **TX2 pin 8**. Protokol **WIT**, frame
 `0x55` 11 byte. TX IMU → pin 7 Teensy, dan **GND wajib tersambung** (paling
 sering terlupa; tanpa itu frame korup, bukan kosong).
 
-**Baud terukur: 9600** — bukan 921600 seperti dugaan awal. Itu memang bawaan
-pabrik perangkat WIT. Perintah `B` memindai 9600…921600 dan memakai yang jalan,
-jadi tidak perlu menebak.
+**Baud: 230400** (maksimum yang disediakan aplikasi WIT untuk modul ini).
+Bawaan pabriknya 9600 — bukan 921600 seperti dugaan awal. Perintah `B` memindai
+9600…921600 dan memakai yang jalan, jadi tidak perlu menebak.
 
 > `config.h` firmware masih menulis `IMU_SERIAL Serial1` — **salah**, harus
 > diubah ke `Serial2` saat port firmware.
@@ -55,24 +55,42 @@ fase pertama.
 
 Selagi IMU tersambung ke PC, ada empat hal yang sebaiknya sekalian dibereskan.
 
-**1. Naikkan baud ke 115200.** Di 9600 baud kapasitasnya hanya 960 byte/detik,
-dan tiap frame 11 byte:
+**1. Baud 230400** (maksimum modul ini). Bawaan 9600 hanya 960 byte/detik —
+dengan 4 paket aktif laju sudut mentok ~21 Hz, jauh di bawah `CONTROL_HZ`.
 
-| Paket aktif | Byte per set | Laju maks di 9600 | di 115200 |
+**2. Output rate 200 Hz**, bukan 50. Bukan karena butuh 200 sampel/detik, tapi
+karena `CONTROL_HZ` firmware = **100 Hz** (`config.h:165`). Kalau IMU juga 100 Hz
+dan keduanya tidak tersinkron, clock-nya berdenyut: sebagian tick kontrol dapat
+dua sampel, sebagian **nol**. Tick kosong memakai nilai lama — masuk sebagai lag
+tak konsisten ke dalam PD. 200 Hz menjamin selalu ada sampel segar tiap tick.
+
+Biayanya ringan: `4 paket × 11 byte × 200 Hz = 8.800 byte/s` dari kapasitas
+`23.040 byte/s` → terpakai **38%**.
+
+**3. Content: pilih 4.**
+
+| Content | Paket | Pilih? | Alasan |
 |---|---|---|---|
-| sudut saja | 11 | ~87 Hz | ~1000 Hz |
-| sudut + magnet | 22 | ~43 Hz | ~520 Hz |
-| accel + gyro + sudut + magnet | 44 | **~21 Hz** | ~260 Hz |
+| Euler angle | `0x53` | **wajib** | yaw untuk heading, roll/pitch untuk stabilisasi |
+| Angular velocity | `0x52` | **ya** | gyro Z: suku D PD tanpa mendiferensiasi yaw berisik, **dan** cadangan belok kalau uji `g` gagal |
+| Magnetism | `0x54` | **ya** | bukti kuantitatif di uji `g` |
+| Acceleration | `0x51` | ya | deteksi terguling, verifikasi IMU datar |
+| Time | `0x50` | tidak | Teensy bisa timestamp sendiri |
+| Pressure | `0x56` | tidak | robot darat; resolusi ~10 cm, hanyut kalau pintu dibuka |
+| Location / PDOP / positioning accuracy | `0x57`/`0x5A` | tidak | modul 10-axis tidak punya GPS — kirim nol saja |
+| Quaternion | `0x59` | tidak | Euler cukup selama tidak mendekati pitch ±90° |
 
-**2. Return rate harus muat di baud.** Kalau rate diset lebih tinggi dari
-kapasitas tabel di atas, frame terpotong dan muncul sebagai **checksum gagal** —
-bukan sebagai "lambat". Ini jebakan paling umum di sensor WIT: orang menaikkan
-rate, datanya jadi rusak, lalu menyalahkan kabel. Perintah `f` menghitung
-kapasitas ini dan memperingatkan kalau sudah mentok.
+**Jangan lewatkan angular velocity.** Kalau uji `g` menyatakan yaw tak layak
+saat servo bergerak, belok 90° masih bisa dilakukan dengan mengintegrasikan
+gyro Z selama manuver pendek — hanyut integrasi tidak sempat menumpuk. Tanpa
+`0x52` aktif, opsi cadangan itu tertutup sama sekali.
 
-**3. Matikan paket yang tidak dipakai.** Alat ini butuh **sudut (`0x53`)** dan
-**magnet (`0x54`)**. Accel & gyro hanya untuk tampilan — mematikannya
-melipatgandakan laju sudut yang bisa dicapai.
+**Return rate harus muat di baud.** Kalau rate melebihi kapasitas, frame
+terpotong dan muncul sebagai **checksum gagal** — bukan sebagai "lambat". Ini
+jebakan paling umum di sensor WIT: orang menaikkan rate, datanya rusak, lalu
+menyalahkan kabel. Perintah `f` menghitung kapasitas ini dan memperingatkan.
+Percayai laju yang diukur `f`, bukan angka di aplikasi — sebagian modul diam-diam
+menurunkan rate kalau content-nya banyak.
 
 **4. Kalibrasi magnetometer — dan lakukan dengan IMU SUDAH TERPASANG di robot.**
 
