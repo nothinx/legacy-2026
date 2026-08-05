@@ -4,8 +4,12 @@ Sketsa berdiri sendiri untuk Teensy 4.1. Board **Teensy 4.1**, Serial Monitor
 **115200**, line ending **Newline**. Library: **Adafruit PWM Servo Driver**.
 
 IMU di **`Serial2`** — **RX2 pin 7**, **TX2 pin 8**. Protokol **WIT**, frame
-`0x55` 11 byte, **921600 baud**. TX IMU → pin 7 Teensy, dan **GND wajib
-tersambung** (paling sering terlupa; tanpa itu frame korup, bukan kosong).
+`0x55` 11 byte. TX IMU → pin 7 Teensy, dan **GND wajib tersambung** (paling
+sering terlupa; tanpa itu frame korup, bukan kosong).
+
+**Baud terukur: 9600** — bukan 921600 seperti dugaan awal. Itu memang bawaan
+pabrik perangkat WIT. Perintah `B` memindai 9600…921600 dan memakai yang jalan,
+jadi tidak perlu menebak.
 
 > `config.h` firmware masih menulis `IMU_SERIAL Serial1` — **salah**, harus
 > diubah ke `Serial2` saat port firmware.
@@ -46,6 +50,46 @@ Perintah `g` dan `s2` **menggerakkan servo**. Taruh robot di atas dudukan /
 kardus sehingga **kaki menggantung bebas**. Robot tidak boleh digeser atau
 diputar selama uji berlangsung — seluruh pengukuran adalah selisih terhadap
 fase pertama.
+
+## Setelan di aplikasi Yahboom/WIT (lewat CP2102)
+
+Selagi IMU tersambung ke PC, ada empat hal yang sebaiknya sekalian dibereskan.
+
+**1. Naikkan baud ke 115200.** Di 9600 baud kapasitasnya hanya 960 byte/detik,
+dan tiap frame 11 byte:
+
+| Paket aktif | Byte per set | Laju maks di 9600 | di 115200 |
+|---|---|---|---|
+| sudut saja | 11 | ~87 Hz | ~1000 Hz |
+| sudut + magnet | 22 | ~43 Hz | ~520 Hz |
+| accel + gyro + sudut + magnet | 44 | **~21 Hz** | ~260 Hz |
+
+**2. Return rate harus muat di baud.** Kalau rate diset lebih tinggi dari
+kapasitas tabel di atas, frame terpotong dan muncul sebagai **checksum gagal** —
+bukan sebagai "lambat". Ini jebakan paling umum di sensor WIT: orang menaikkan
+rate, datanya jadi rusak, lalu menyalahkan kabel. Perintah `f` menghitung
+kapasitas ini dan memperingatkan kalau sudah mentok.
+
+**3. Matikan paket yang tidak dipakai.** Alat ini butuh **sudut (`0x53`)** dan
+**magnet (`0x54`)**. Accel & gyro hanya untuk tampilan — mematikannya
+melipatgandakan laju sudut yang bisa dicapai.
+
+**4. Kalibrasi magnetometer — dan lakukan dengan IMU SUDAH TERPASANG di robot.**
+
+Ini yang paling penting dan paling sering dilakukan terbalik. Kalibrasi
+hard-iron di aplikasi WIT mengukur medan tetap di sekitar sensor lalu
+mengurangkannya. Kalau dikalibrasi saat IMU masih di meja, ia hanya membuang
+medan **meja** — begitu dipasang di robot, besi rangka dan magnet servo
+memasukkan medan baru yang tidak terkoreksi.
+
+Jadi: pasang IMU di posisi finalnya, servo **tidak bertenaga**, lalu putar
+**seluruh robot** perlahan mengikuti prosedur kalibrasi aplikasi.
+
+Ini menyambung langsung ke uji `g`: kalibrasi hard-iron menghilangkan komponen
+**statis**, sehingga yang tersisa untuk diukur `g` benar-benar komponen
+**dinamis** — satu-satunya yang tidak bisa diperbaiki. Karena itu kalibrasi
+sebaiknya dituntaskan **sebelum** menjalankan `g`, kalau tidak angka fase 2
+hanya mengukur sesuatu yang sebenarnya masih bisa dibereskan.
 
 ## Uji inti: `g`
 
@@ -127,17 +171,22 @@ pertamanya.
 | `w<der>` | amplitudo goyang, 2–30° |
 | `p<detik>` | lama tiap fase uji `g`, 3–60 detik |
 | **lain** | |
-| `b<n>` | baud 0=115200 1=230400 2=460800 3=921600 |
+| `B` | **pindai baud** 9600…921600, pakai yang jalan |
+| `b<baud>` | set baud langsung (mis. `b9600`, `b115200`) |
 | `h` | bantuan |
 
 ## Urutan pemakaian yang disarankan
 
 ```
-f          -> pastikan jalurnya bersih dulu (frame/s wajar, checksum gagal ~0%)
+B          -> pindai baud, temukan yang jalan
+f          -> jalur bersih? (checksum gagal ~0%, laju sudut cukup)
 a          -> lihat yaw bergerak saat robot diputar tangan; masuk akal?
 d60        -> hanyutan saat diam
 g          -> UJI PENENTU: taruh di dudukan, kaki menggantung
 ```
+
+Kalibrasi magnetometer (dengan IMU terpasang di robot) sebaiknya sudah selesai
+sebelum `d60` dan `g` — lihat bagian setelan aplikasi di atas.
 
 Catat angka fase 3 dari `g`. Itu yang menentukan apakah pemetaan kompas
 (4 arah U/T/S/B) layak dibangun, atau harus pindah ke acuan lidar.

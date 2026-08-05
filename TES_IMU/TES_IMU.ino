@@ -52,7 +52,7 @@
 #define WIGGLE_HZ       0.7f     // frekuensi goyang saat uji gangguan
 #define SERVO_RATE_MS   20       // 50 Hz penulisan servo
 
-uint32_t imuBaud   = 921600;
+uint32_t imuBaud   = 9600;
 float    wiggleAmp = 10.0f;      // derajat, amplitudo goyang
 uint16_t faseDetik = 8;          // lama tiap fase uji 'g'
 
@@ -448,6 +448,28 @@ static void printStat() {
     }
     Serial.println();
 
+    // Laju paket SUDUT = laju kontrol heading. Ini angka yang penting untuk
+    // navigasi, bukan byte/detik.
+    float lajuSudut = stTipe[3] / det;
+    Serial.print(F("  laju sudut (0x53) : ")); Serial.print(lajuSudut, 0);
+    Serial.println(F(" Hz   <- laju kontrol heading"));
+
+    // Berapa yang MUAT pada baud ini: tiap frame 11 byte, 10 bit per byte.
+    // Kalau return rate IMU diset lebih tinggi dari ini, frame terpotong dan
+    // muncul sebagai checksum gagal — bukan sebagai "lambat".
+    uint8_t aktif = 0;
+    for (uint8_t i = 0; i < 8; i++) if (stTipe[i]) aktif++;
+    if (aktif) {
+        float maks = imuBaud / 10.0f / (11.0f * aktif);
+        Serial.print(F("  kapasitas baud    : ")); Serial.print(aktif);
+        Serial.print(F(" jenis paket aktif -> maks ")); Serial.print(maks, 0);
+        Serial.println(F(" Hz"));
+        if (lajuSudut > maks * 0.9f) {
+            Serial.println(F("    ! sudah mentok kapasitas baud. Naikkan baud, atau matikan"));
+            Serial.println(F("      paket yang tak dipakai (accel/gyro) di aplikasi WIT."));
+        }
+    }
+
     Serial.print(F("  VONIS: "));
     if (stOk == 0)
         Serial.println(F("TIDAK ADA FRAME. Cek TX IMU -> RX2 (pin 7), GND tersambung, baud."));
@@ -458,6 +480,57 @@ static void printStat() {
         Serial.println(F("frame sudut (0x53) tidak dikirim — nyalakan output Angle di aplikasi WIT."));
     else
         Serial.println(F("jalur bersih."));
+}
+
+// ======================================================== pindai baud
+// Perangkat WIT keluar pabrik di 9600. Daripada menebak, coba semuanya dan
+// lihat mana yang menghasilkan frame sah.
+static const uint32_t BAUD_LIST[] = { 9600, 19200, 38400, 57600, 115200,
+                                      230400, 460800, 921600 };
+#define N_BAUD (sizeof(BAUD_LIST) / sizeof(BAUD_LIST[0]))
+
+static void setBaud(uint32_t b) {
+    imuBaud = b;
+    IMU_SERIAL.end();
+    IMU_SERIAL.addMemoryForRead(rxExtra, sizeof(rxExtra));   // harus sebelum begin()
+    IMU_SERIAL.begin(imuBaud);
+    rxN = 0;
+    statReset();
+}
+
+static void pindaiBaud() {
+    Serial.println(F("\n--- Pindai baud IMU ---"));
+    Serial.println(F("  baud     frame sah   checksum gagal"));
+    uint32_t terbaik = 0; uint32_t skorTerbaik = 0;
+
+    for (uint8_t i = 0; i < N_BAUD; i++) {
+        setBaud(BAUD_LIST[i]);
+        delay(150);
+        while (IMU_SERIAL.available()) IMU_SERIAL.read();   // buang sisa baud lama
+        rxN = 0; statReset();
+
+        uint32_t t0 = millis();
+        while (millis() - t0 < 1200) witPump();
+
+        Serial.print(F("  ")); Serial.print(BAUD_LIST[i]);
+        for (uint8_t k = 0; k < 9 - (BAUD_LIST[i] >= 100000 ? 6 : 5); k++) Serial.print(' ');
+        Serial.print(stOk);
+        Serial.print(F("           ")); Serial.print(stSumBad);
+        if (stOk > 0 && stOk > stSumBad) Serial.print(F("   <-- jalan"));
+        Serial.println();
+
+        if (stOk > skorTerbaik) { skorTerbaik = stOk; terbaik = BAUD_LIST[i]; }
+    }
+
+    if (!terbaik) {
+        Serial.println(F("  TIDAK ADA baud yang menghasilkan frame."));
+        Serial.println(F("  Cek TX IMU -> RX2 (pin 7) dan GND bersama. Tanpa GND,"));
+        Serial.println(F("  gejalanya frame korup/kosong, bukan 'baud salah'."));
+        setBaud(BAUD_LIST[0]);
+        return;
+    }
+    Serial.print(F("  -> dipakai ")); Serial.println(terbaik);
+    setBaud(terbaik);
 }
 
 // ============================================================ bantuan
@@ -480,8 +553,9 @@ static void printHelp() {
     Serial.println(F("  w<der>   amplitudo goyang, derajat (mis. w15)"));
     Serial.println(F("  p<detik> lama tiap fase uji 'g' (mis. p12)"));
     Serial.println(F(" LAIN"));
-    Serial.println(F("  b<n>     baud: 0=115200 1=230400 2=460800 3=921600"));
-    Serial.println(F("           (IMU harus diset ke baud yang sama lewat aplikasi WIT)"));
+    Serial.println(F("  B        PINDAI baud — coba 9600..921600, pakai yang jalan"));
+    Serial.println(F("  b<baud>  set baud langsung (mis. b9600, b115200)"));
+    Serial.println(F("           IMU harus diset ke baud yang sama lewat aplikasi WIT"));
     Serial.println(F("  h        bantuan"));
     Serial.println(F("=================================================\n"));
 }
@@ -555,18 +629,16 @@ static void handleCmd(char* s) {
             Serial.print(F("lama tiap fase = ")); Serial.print(faseDetik); Serial.println(F(" detik"));
             break;
 
-        case 'b': {
-            const uint32_t B[4] = { 115200, 230400, 460800, 921600 };
-            if (d1 > 3) { Serial.println(F("b0=115200 b1=230400 b2=460800 b3=921600")); break; }
-            imuBaud = B[d1];
-            IMU_SERIAL.end();
-            IMU_SERIAL.addMemoryForRead(rxExtra, sizeof(rxExtra));   // harus sebelum begin()
-            IMU_SERIAL.begin(imuBaud);
-            rxN = 0; statReset();
+        case 'b':
+            if (num < 1200 || num > 921600) {
+                Serial.println(F("tulis baud-nya langsung, mis. b9600 atau b115200"));
+                break;
+            }
+            setBaud((uint32_t)num);
             Serial.print(F("baud Teensy = ")); Serial.println(imuBaud);
             Serial.println(F("IMU-nya juga harus diset ke baud ini, kalau tidak semua frame korup."));
             break;
-        }
+        case 'B': mode = IDLE; pindaiBaud(); break;
         case 0: break;
         default: Serial.println(F("perintah tidak dikenal, ketik 'h'"));
     }

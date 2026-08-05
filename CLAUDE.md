@@ -92,7 +92,19 @@ Akhiri dengan commit + push.
 
 ### 1. IMU Yahboom 10-axis — `TES_IMU/` SUDAH DIBUAT, belum dijalankan
 
-Protokol WIT, frame `0x55`, **`Serial2` = RX2 pin 7 / TX2 pin 8**, 921600 baud.
+Protokol WIT, frame `0x55`, **`Serial2` = RX2 pin 7 / TX2 pin 8**.
+
+**Baud terukur 9600, bukan 921600** (bawaan pabrik WIT) — jadi `IMU_BAUD 921600`
+di `config.h` juga salah. Rencana: naikkan ke 115200 lewat aplikasi Yahboom,
+karena di 9600 dengan 4 jenis paket aktif laju sudut mentok **~21 Hz**. Kalau
+return rate diset melebihi kapasitas baud, frame terpotong dan muncul sebagai
+checksum gagal — bukan sebagai "lambat". `TES_IMU` punya `B` (pindai baud) dan
+`f` (hitung kapasitas).
+
+**Kalibrasi magnetometer harus dilakukan saat IMU SUDAH TERPASANG di robot**
+(servo tanpa tenaga, putar seluruh robot). Kalibrasi di meja hanya membuang
+medan meja. Ini menghilangkan komponen **statis**, sehingga uji `g` benar-benar
+mengukur komponen **dinamis** — satu-satunya yang tak bisa diperbaiki.
 
 **`config.h` masih menulis `IMU_SERIAL Serial1` — salah, ubah ke `Serial2`.**
 Akibatnya `Serial2` tidak lagi tersedia untuk Raspberry Pi. Pi harus pindah,
