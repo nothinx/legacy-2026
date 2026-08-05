@@ -65,6 +65,20 @@ Pose berdiri dari IK: coxa **90.00°**, femur **79.43°**, tibia **82.02°**
 | `SET_HOME/` | netral 90° & pose berdiri, auto-home saat boot, uji arah per sendi |
 | `KALIBRASI/` | trim, uji kemulusan IK per kaki, gait tripod, knob kecepatan |
 | `MAP_LIDAR/` | pemetaan channel mux → posisi fisik lidar, kalibrasi offset jarak, cetak kode config.h |
+| `TES_IMU/` | frame WIT + statistik, hanyutan saat diam, **uji gangguan magnet servo 3 fase** |
+
+**PETA EEPROM** (Teensy 4.1, 4284 byte) — tiap alat menulis di alamat berbeda,
+jangan ada yang bertabrakan:
+
+| Alamat | Isi | Ditulis oleh |
+|---|---|---|
+| 0 .. ~280 | blok `Calib` firmware | `Calib.cpp` (`CALIB_ADDR 0`) |
+| 1024 .. ~1150 | `ServoMap` | `servo_map.h` (`SM_EE_ADDR 1024`) |
+| 1536 .. ~1560 | pemetaan & offset lidar | `MAP_LIDAR` (`EE_ADDR 1536`) |
+
+`MAP_LIDAR` semula memakai alamat 0 → perintah `e` menimpa kalibrasi firmware.
+Sudah diperbaiki. Kalau Teensy pernah dipakai MAP_LIDAR versi lama, blok `Calib`
+akan gagal CRC dan otomatis kembali ke default (tidak fatal, tapi trim hilang).
 
 `servo_map.h` ada di TES_SERVO, SET_HOME, KALIBRASI — **kalau diubah, salin ke
 ketiganya** (Arduino IDE tidak bisa berbagi file antar folder sketsa).
@@ -76,18 +90,27 @@ ketiganya** (Arduino IDE tidak bisa berbagi file antar folder sketsa).
 Fokus sensor saja. **Belum menyentuh algoritma** (navigasi, FSM misi, vision).
 Akhiri dengan commit + push.
 
-### 1. IMU Yahboom 10-axis — PRIORITAS UTAMA, belum pernah diuji sama sekali
+### 1. IMU Yahboom 10-axis — `TES_IMU/` SUDAH DIBUAT, belum dijalankan
 
-Satu-satunya subsistem yang sama sekali belum disentuh hardware-nya.
 Protokol WIT, frame `0x55`, `Serial1`, **921600 baud**.
 
-Buat `TES_IMU/`:
-- baca frame mentah, hitung **rasio checksum gagal** dan **frame drop/detik**
-  (921600 di kabel panjang rawan; kalau rusak, ini yang menunjukkannya)
-- tampilkan roll/pitch/yaw + accel + gyro + mag
-- tare roll/pitch; uji gate lonjakan yaw (`IMU_MAX_YAW_JUMP` 30°/sampel)
-- **uji gangguan magnet**: dekatkan servo/motor saat berjalan, lihat yaw meleset
-  berapa derajat. Ini menentukan apakah yaw bisa dipercaya untuk heading arena.
+**Angka penentu: pergeseran yaw saat servo bergerak** (`g`, 3 fase — servo
+mati / bertenaga diam / bergerak). Bedakan:
+
+- **statis** (rangka besi, magnet servo diam) → konstan, **bisa** dikoreksi
+  lewat `HEAD_*`;
+- **dinamis** (arus 18 servo, magnet bergerak) → **tidak bisa** dikoreksi.
+
+Ambang: < 5° yaw layak jadi acuan utama · 5–15° perlu disilangkan dengan sudut
+dinding lidar · > 15° kompas tidak layak dipakai sambil berjalan.
+
+Gate `IMU_MAX_YAW_JUMP` 30° **tidak** melindungi dari ini — ia menolak lonjakan,
+sedangkan kegagalannya berupa pergeseran bertahap (40° dalam 2 detik lolos).
+
+Dua hal di `TES_IMU` sengaja beda dari `Imu.cpp` dan harus diadopsi firmware
+kalau terbukti perlu: **resinkronisasi buang-1-byte** (bukan buang 11, yang
+membuat satu byte hilang merusak seluruh frame berikutnya) dan **buffer RX
++2 KB** (bawaan 64 byte = 0,7 ms data pada 921600).
 
 ### 2. Arah lidar — pakai `MAP_LIDAR/` (sudah dibuat)
 

@@ -42,7 +42,12 @@
 #define CAL_SAMPLES     30       // sampel per titik kalibrasi
 #define CAL_LOG_MAX     16       // riwayat kalibrasi satu sesi
 
-#define EE_ADDR         0        // alamat awal di EEPROM
+// PETA EEPROM Teensy 4.1 (4284 byte) — jangan ada yang bertabrakan:
+//      0 .. ~280  blok Calib firmware  (Calib.cpp: CALIB_ADDR 0)
+//   1024 .. ~1150 ServoMap             (servo_map.h: SM_EE_ADDR 1024)
+//   1536 ..       pemetaan lidar       (di sini)
+// Sebelumnya alamat 0 -> perintah 'e' menimpa kalibrasi firmware.
+#define EE_ADDR         1536
 #define EE_MAGIC0       0xA5
 #define EE_MAGIC1       0x5C
 #define EE_VER          1
