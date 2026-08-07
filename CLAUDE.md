@@ -66,6 +66,7 @@ Pose berdiri dari IK: coxa **90.00°**, femur **79.43°**, tibia **82.02°**
 | `KALIBRASI/` | trim, uji kemulusan IK per kaki, gait tripod, knob kecepatan |
 | `MAP_LIDAR/` | pemetaan channel mux → posisi fisik lidar, kalibrasi offset jarak, cetak kode config.h |
 | `TES_IMU/` | frame WIT + statistik, hanyutan saat diam, **uji gangguan magnet servo 3 fase** |
+| `TES_GERAK/` | gait (port firmware), body kinematics, pivot tertutup + kalibrasi der/siklus & mm/siklus, simulasi kering laju sendi |
 
 **PETA EEPROM** (Teensy 4.1, 4284 byte) — tiap alat menulis di alamat berbeda,
 jangan ada yang bertabrakan:
@@ -76,13 +77,15 @@ jangan ada yang bertabrakan:
 | 1024 .. ~1150 | `ServoMap` | `servo_map.h` (`SM_EE_ADDR 1024`) |
 | 1536 .. ~1560 | pemetaan & offset lidar | `MAP_LIDAR` (`EE_ADDR 1536`) |
 | 1792 .. ~1812 | 4 arah kompas arena | `TES_IMU` (`EE_KOMPAS_ADDR 1792`) |
+| 2048 .. ~2068 | der/siklus pivot, mm/siklus maju, tanda pivot | `TES_GERAK` (`EE_GERAK_ADDR 2048`) |
 
 `MAP_LIDAR` semula memakai alamat 0 → perintah `e` menimpa kalibrasi firmware.
 Sudah diperbaiki. Kalau Teensy pernah dipakai MAP_LIDAR versi lama, blok `Calib`
 akan gagal CRC dan otomatis kembali ke default (tidak fatal, tapi trim hilang).
 
-`servo_map.h` ada di TES_SERVO, SET_HOME, KALIBRASI — **kalau diubah, salin ke
-ketiganya** (Arduino IDE tidak bisa berbagi file antar folder sketsa).
+`servo_map.h` ada di TES_SERVO, SET_HOME, KALIBRASI, TES_IMU, TES_GERAK —
+**kalau diubah, salin ke semuanya** (Arduino IDE tidak bisa berbagi file antar
+folder sketsa). Sama untuk `kinematics.h` di KALIBRASI dan TES_GERAK.
 
 ---
 
@@ -109,8 +112,10 @@ sepasang lidar samping tetap berguna untuk menyikukan robot saat mencatat arah).
 
 `TES_IMU` sudah punya kompas 4 arah (`c<n>` catat, `k` tabel + cek kelinieran,
 `o<n>` pivot, EEPROM 1792) dengan sektor berhisteresis 40°/50°.
-**`gaitPutar()` masih placeholder** — robot belum bergerak sendiri; `o<n>`
-dipakai dengan memutar robot manual untuk memverifikasi tanda arah putar.
+`gaitPutar()` di TES_IMU masih placeholder — `o<n>` di sana hanya untuk memutar
+robot manual dan memeriksa tanda. **Pivot yang sebenarnya sudah ada di
+`TES_GERAK/` (`C` kalibrasi, `O`/`o` pivot tertutup)**, membaca 4 arah kompas
+dari EEPROM 1792 yang sama.
 
 
 Protokol WIT, frame `0x55`, **`Serial2` = RX2 pin 7 / TX2 pin 8**.
@@ -232,11 +237,35 @@ Port firmware ke hardware nyata — ini yang membuat `HEXAPOD_KRSRI_2026/` bisa 
 - gate `getRangeStatus()==0` diganti: buang nilai ≥ 8000, **nilai > `LIDAR_MAX_CM`**,
   & `timeoutOccurred()` — yang tengah paling gampang terlupa
 
+Tiga temuan dari `TES_GERAK/` (dihitung, belum diuji di robot) yang harus ikut
+masuk saat port — detail & angkanya di `TES_GERAK/README.md`:
+
+- **`solvePose` memakai invers palsu.** `rotatePoint(p, -roll, -pitch, -yaw)`
+  adalah fungsi maju dengan sudut dinegatifkan, bukan invers `Rz*Ry*Rx`. Tepat
+  kalau cuma satu sumbu aktif; begitu roll+pitch bersamaan (stabilisasi IMU di
+  medan miring, `STAB_MAX_DEG` 15) ujung kaki melenceng ~10 mm. Pakai
+  `moRotInv()` — urutan rotasinya dibalik, bukan sudutnya.
+- **Fase gait `fmod(elapsed, cycleTime)` melompat saat profil di-ramp.** Karena
+  `elapsed` terus tumbuh, mengubah `cycleTime` setelah berjalan 30 detik
+  menggeser fase sampai **0,48** — kedua tripod bertukar peran seketika dan
+  robot menjatuhkan badan, tepat saat masuk tangga. Akumulasi `dt/cycleTime`
+  kebal terhadap ini.
+- **`GaitProfile` butuh field `standR`.** `STAND_RADIUS` masih `#define`, jadi
+  profil tidak bisa mengecilkan bentang kaki — `profileNarrow()` mustahil
+  tanpa field ini.
+
+Juga dari simulasi kering (`S`), sebelum servo dipaksa mencobanya:
+`profileStairs()` firmware meminta femur **388°/s** dan putar di tempat meminta
+coxa **348°/s**, sedangkan RDS3235 realistis ~260°/s berbeban. Profil DATAR pun
+sudah 254–256°/s — gait bawaan berjalan tepat di batas servo, tidak ada cadangan.
+
 Baru sesudah itu: algoritma (nav PD sudah ada, FSM misi ↔ arena R1–R11,
 profil gait NARROW untuk R11, watchdog, Mission ↔ Vision).
 
-**R11 celah 30 cm**: berdiri normal robot 32 cm — belum muat. Butuh
-`profileNarrow()`, target bentang ≤ 28–29 cm.
+**R11 celah 30 cm**: berdiri normal robot 32 cm — belum muat. `TES_GERAK` `N300`
+menghitung **bentang kaki 45 mm → badan 27,0 cm** (sisa 3 cm untuk lebar telapak
+& galat kemudi); 48 mm sudah tidak muat. Angka itu sudah jadi profil SEMPIT di
+`TES_GERAK/motion.h`, tinggal diverifikasi fisik lalu dipindah ke firmware.
 
 ## CATATAN
 
@@ -247,6 +276,9 @@ profil gait NARROW untuk R11, watchdog, Mission ↔ Vision).
   buatan sendiri **tidak boleh muncul di tanda tangan fungsi** dalam file `.ino`
   (`'X' does not name a type`) — taruh tipenya di file `.h`, atau ganti parameter
   jadi `(const void*, size_t)`. Kena di `MAP_LIDAR` (`storeSum`).
+- `TES_GERAK/test_motion.py` — uji matematika gerak **tanpa hardware**, replika
+  Python dari `motion.h` (tak butuh g++, yang memang belum terpasang). Jalankan
+  ulang tiap kali `motion.h` diubah.
 - Preferensi user: **JANGAN pakai Co-Authored-By Claude** di commit message.
 - Library: Teensyduino, Adafruit PWM Servo Driver, **VL53L0X by Pololu**.
 - Batas kecepatan servo: RDS3235 ~0,15 s/60°. Bottleneck bukan I2C
