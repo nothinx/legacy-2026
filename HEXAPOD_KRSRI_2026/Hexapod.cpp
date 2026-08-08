@@ -2,7 +2,7 @@
 #include <Arduino.h>
 
 Hexapod::Hexapod() : _armR(&_servos, ARM_PIN_MAP_R), _armL(&_servos, ARM_PIN_MAP_L) {
-    _roll = _pitch = _yaw = 0.0f;
+    _rotX = _rotY = _rotZ = 0.0f;
     _trans = {0, 0, 0};
     _lastStabT = 0;
 }
@@ -31,6 +31,10 @@ void Hexapod::walk(float forward, float strafe, float turn) {
 void Hexapod::stop() { _gait.setMoveVector(0, 0, 0); }
 
 void Hexapod::setStabilization(float rollDeg, float pitchDeg) {
+#if STAB_SWAP_ROLL_PITCH
+    // IMU terpasang menyudut 90 der terhadap badan (lihat config.h).
+    float tmp = rollDeg; rollDeg = pitchDeg; pitchDeg = tmp;
+#endif
     // deadband
     if (fabsf(rollDeg)  < STAB_DEADBAND_DEG) rollDeg  = 0;
     if (fabsf(pitchDeg) < STAB_DEADBAND_DEG) pitchDeg = 0;
@@ -43,8 +47,11 @@ void Hexapod::setStabilization(float rollDeg, float pitchDeg) {
     _lastStabT = now;
     dt = clampf(dt, 0.0f, 0.05f);
     float a = dt / (STAB_TAU + dt);
-    _roll  = lerpf(_roll,  deg2rad(rollDeg),  a);
-    _pitch = lerpf(_pitch, deg2rad(pitchDeg), a);
+    // PEMETAAN SUMBU — inilah yang dulu tertukar:
+    //   roll (miring kanan/kiri) = rotasi terhadap sumbu DEPAN  +Y  -> _rotY
+    //   pitch (dongak/menunduk)  = rotasi terhadap sumbu KANAN  +X  -> _rotX
+    _rotY = lerpf(_rotY, deg2rad(rollDeg),  a);
+    _rotX = lerpf(_rotX, deg2rad(pitchDeg), a);
 }
 
 void Hexapod::setBodyTranslation(float x, float y, float z) { _trans = {x, y, z}; }
@@ -54,17 +61,44 @@ void Hexapod::jog(uint8_t tuneId, uint16_t pulseUs) {
     _servos.writeRaw(TUNE_PIN_MAP[tuneId][0], TUNE_PIN_MAP[tuneId][1], pulseUs);
 }
 
+// Selisih profil ditulis relatif GAIT_* supaya penyetelan lewat GUI tuner ikut
+// terbawa. Angka siklusnya BUKAN pilihan estetika: hasil pencarian di
+// TES_GERAK/test_motion.py supaya laju sendi tertinggi tetap di bawah ~260
+// der/s (RDS3235 berbeban). Ubah salah satunya -> jalankan lagi test itu.
 void Hexapod::profileFlat() {
-    _gait.setProfile({ GAIT_STEP_HEIGHT, GAIT_STEP_LENGTH, GAIT_CYCLE_TIME, STAND_HEIGHT });
+    // laju sendi maks 256 der/s — tepat di batas, tanpa cadangan.
+    // Kalau servo terlihat tertinggal, naikkan gait.cycle_time ke 1000.
+    _gait.setProfile({ GAIT_STEP_HEIGHT, GAIT_STEP_LENGTH, GAIT_CYCLE_TIME,
+                       STAND_HEIGHT, STAND_RADIUS });
 }
 void Hexapod::profileStairs() {
-    // langkah lebih tinggi & panjang, badan sedikit lebih tinggi, lebih lambat.
-    _gait.setProfile({ GAIT_STEP_HEIGHT + 35.0f, GAIT_STEP_LENGTH + 20.0f,
-                       GAIT_CYCLE_TIME + 300.0f, STAND_HEIGHT + 10.0f });
+    // Angkat kaki jauh lebih tinggi (harus melewati anak tangga) dan JAUH
+    // lebih lambat. Versi lama (+300 ms) meminta femur 388 der/s — mustahil
+    // berbeban; +900 ms menurunkannya ke 252 der/s. Jalan jadi 3,9 cm/detik,
+    // dan itu memang harga menaiki tangga.
+    _gait.setProfile({ GAIT_STEP_HEIGHT + 35.0f, GAIT_STEP_LENGTH + 10.0f,
+                       GAIT_CYCLE_TIME + 900.0f, STAND_HEIGHT + 10.0f, STAND_RADIUS });
 }
 void Hexapod::profileCrouch() {
-    // menunduk untuk masuk celah / ambil korban rendah.
-    _gait.setProfile({ GAIT_STEP_HEIGHT, GAIT_STEP_LENGTH, GAIT_CYCLE_TIME, STAND_HEIGHT - 20.0f });
+    // Menunduk untuk masuk celah / ambil korban rendah. Badan rendah membuat
+    // femur bekerja lebih keras (303 der/s pada siklus lama), jadi ikut
+    // diperlambat ke 1100 ms -> 248 der/s.
+    _gait.setProfile({ GAIT_STEP_HEIGHT, GAIT_STEP_LENGTH - 5.0f,
+                       GAIT_CYCLE_TIME + 200.0f, STAND_HEIGHT - 20.0f, STAND_RADIUS });
+}
+void Hexapod::profileNarrow() {
+    // R11: celah 30 cm sedangkan berdiri normal 32 cm. Satu-satunya cara
+    // mengecilkan hexapod adalah MENARIK KAKI MASUK -> standRadius 70 -> 45,
+    // bentang 32,0 -> 27,0 cm, sisa 3 cm untuk lebar telapak & galat kemudi.
+    // (48 mm sudah tidak muat — dicari di TES_GERAK 'N300'.)
+    //
+    // BATASAN: yang melebarkan badan adalah MENGGESER MENYAMPING (strafe) —
+    // bentang jadi 31,5 cm, lebih lebar dari celahnya. BERBELOK tidak: kaki
+    // tengah, yang paling lebar, bergerak searah badan saat berputar. Jadi
+    // koreksi heading di dalam celah aman; strafe tidak. Navigation memang
+    // tak pernah mengisi NavCmd.strafe — jangan mulai sekarang.
+    _gait.setProfile({ GAIT_STEP_HEIGHT - 10.0f, GAIT_STEP_LENGTH - 15.0f,
+                       GAIT_CYCLE_TIME + 100.0f, STAND_HEIGHT, STAND_RADIUS - 25.0f });
 }
 
 // geoAngle (derajat) -> pulse, dengan kalibrasi per-servo.
@@ -83,9 +117,12 @@ void Hexapod::solvePose() {
     for (int leg = 0; leg < 6; leg++) {
         Vec3 foot = _gait.legTargets[leg];
 
-        // 1) Body transform (inverse): supaya kaki tetap di target saat badan miring/geser.
+        // 1) Body transform (INVERS): supaya kaki tetap di target saat badan
+        // miring/geser. rotatePointInv, bukan rotatePoint dengan sudut
+        // dinegatifkan — yang terakhir bukan invers begitu dua sumbu aktif
+        // bersamaan (lihat types.h; meleset ~10 mm pada roll+pitch 15 der).
         Vec3 p = { foot.x - _trans.x, foot.y - _trans.y, foot.z - _trans.z };
-        Vec3 pb = rotatePoint(p, -_roll, -_pitch, -_yaw);
+        Vec3 pb = rotatePointInv(p, _rotX, _rotY, _rotZ);
 
         // 2) Relatif pangkal coxa.
         float vx = pb.x - BODY_LEG_ORIGINS[leg][0];

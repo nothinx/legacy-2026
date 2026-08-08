@@ -156,6 +156,19 @@ const uint8_t ARM_PIN_MAP_L[ARM_NUM_SERVOS][2] = { {1, 12}, {1, 13}, {1, 14} };
 #define STAB_MAX_DEG      15.0f   // clamp koreksi roll/pitch (const)
 #define STAB_DEADBAND_DEG 1.0f    // abaikan getaran kecil (const)
 
+// Apakah roll & pitch IMU tertukar terhadap badan?
+// IMU melaporkan roll/pitch terhadap SUMBUNYA SENDIRI. Kalau modul terpasang
+// menyudut 90 derajat terhadap badan, "roll" IMU sebenarnya pitch robot dan
+// stabilisasi akan mengoreksi sumbu yang salah — badan justru makin miring.
+// STAB_SIGN_* hanya membalik TANDA, tidak bisa menukar SUMBU.
+//
+// Cara memastikan (2 menit, tanpa servo):
+//   1. buka TES_IMU, ketik 'a' (tampil terus-menerus)
+//   2. miringkan robot ke KANAN (roda kanan turun), jangan didongakkan
+//   3. kalau angka ROLL yang berubah  -> biarkan 0
+//      kalau angka PITCH yang berubah -> ubah jadi 1
+#define STAB_SWAP_ROLL_PITCH 0
+
 // Refresh servo (knob hardware). RDS3235 digital sering sanggup > 50 Hz.
 // Naikkan untuk micro-motion lebih halus; turunkan bila servo panas/getar.
 #define SERVO_PWM_FREQ    50      // Hz, frekuensi sinyal PCA9685
