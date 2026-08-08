@@ -52,17 +52,19 @@ struct GaitProfile {
     float standR;     // bentang kaki dari pangkal coxa (mm)
 };
 
-// Empat profil medan.
+// Empat profil medan. Semua siklus di bawah ini hasil PENCARIAN supaya laju
+// sendi tertinggi tetap di bawah ~260 der/s (RDS3235 berbeban), bukan angka
+// bulat yang enak dilihat:
+//   TANGGA   1200 -> 1800 ms  (femur tadinya 388 der/s, sekarang 252)
+//   MERUNDUK  900 -> 1100 ms  (femur tadinya 303 der/s, sekarang 248)
 // SEMPIT untuk celah 30 cm di R11: bentang = 2*(90 + standR) = 270 mm pada
-// standR 45, sisa 3 cm untuk lebar telapak + galat kemudi. Angka 45 ini hasil
-// pencarian ('N300'), bukan tebakan — 48 mm sudah tidak muat.
-// TANGGA menyalin profileStairs() firmware apa adanya. Perintah 'S' akan
-// mengeluhkan femur-nya terlalu cepat; itu memang temuan tentang firmware,
-// jangan "dibetulkan" di sini tanpa mengubah firmware juga.
+// standR 45, sisa 3 cm untuk lebar telapak + galat kemudi. 48 mm tidak muat.
+// DATAR sengaja tetap 900 ms (256 der/s, tepat di batas): ia gait sehari-hari
+// dan 10% kecepatan mahal. Kalau servo terlihat tertinggal, naikkan ke 1000.
 static const GaitProfile PROFIL[4] = {
     {  40.0f, 60.0f,  900.0f, 100.0f, 70.0f },   // 0 DATAR
-    {  75.0f, 80.0f, 1200.0f, 110.0f, 70.0f },   // 1 TANGGA
-    {  40.0f, 55.0f,  900.0f,  80.0f, 70.0f },   // 2 MERUNDUK
+    {  75.0f, 70.0f, 1800.0f, 110.0f, 70.0f },   // 1 TANGGA
+    {  40.0f, 55.0f, 1100.0f,  80.0f, 70.0f },   // 2 MERUNDUK
     {  30.0f, 45.0f, 1000.0f, 100.0f, 45.0f }    // 3 SEMPIT
 };
 static const char* const PROFIL_NAMA[4] = { "DATAR", "TANGGA", "MERUNDUK", "SEMPIT" };
@@ -100,6 +102,33 @@ public:
     float bodyRoll  = 0, bodyPitch = 0, bodyYaw = 0;
     float bodyTx    = 0, bodyTy    = 0, bodyTz  = 0;
 
+    // --- trim RATA badan: hasil kalibrasi otomatis pakai IMU ('A') ---
+    // Ditambahkan ke bodyRoll/bodyPitch di SETIAP solve(), termasuk selama
+    // berjalan, dan sengaja TERPISAH dari bodyRoll/bodyPitch supaya 'b0'
+    // (nolkan pose) tidak ikut menghapus hasil kalibrasi.
+    //
+    // Kenapa rotasi badan, bukan offset tinggi per kaki: satu IMU hanya
+    // mengukur 2 derajat kebebasan (arah gravitasi), sedangkan galat tinggi
+    // 6 kaki punya 6. Yang bisa disimpulkan dari 2 pengukuran hanyalah
+    // BIDANG yang paling cocok melalui keenam telapak — dan memiringkan badan
+    // terhadap bidang itu persis koreksinya. Galat sisa antar kaki (satu kaki
+    // pendek sendiri) tidak terlihat oleh IMU dan harus diperbaiki di
+    // KALIBRASI; 'A' mencetak berapa mm ekuivalennya per kaki untuk itu.
+    float trimRoll = 0, trimPitch = 0;
+
+    // --- offset tinggi telapak PER KAKI (mm), dari kalibrasi 'J'/'K' ---
+    // Negatif = kaki dipanjangkan (telapak turun). Ditambahkan ke titik netral
+    // tiap kaki, jadi ikut terbawa saat BERDIRI maupun saat BERJALAN (fase
+    // tumpu dan ayun sama-sama dibangun dari titik netral itu).
+    //
+    // Ini melengkapi trimRoll/trimPitch, tidak menggantikannya, dan keduanya
+    // TIDAK saling tumpang tindih:
+    //   zOff      -> membuat keenam telapak SEBIDANG  (yang IMU tidak bisa lihat)
+    //   trimRoll/Pitch -> memiringkan badan terhadap bidang itu supaya RATA
+    // Urutannya wajib zOff dulu: selama masih ada kaki menggantung, IMU cuma
+    // melihat bidang lewat kaki yang menapak dan 'A' meratakan bidang yang salah.
+    float zOff[6] = { 0, 0, 0, 0, 0, 0 };
+
     // --- knob yang di firmware ada di Calib ---
     float duty      = MO_DUTY_DEF;
     float slewRate  = MO_SLEW_DEF;
@@ -117,8 +146,10 @@ public:
     }
 
     void computeHome() {
-        for (uint8_t i = 0; i < 6; i++)
+        for (uint8_t i = 0; i < 6; i++) {
             footHome(i, prof.standR, prof.standH, _home[i]);
+            _home[i][2] += zOff[i];
+        }
     }
 
     // Paksa kaki ke titik netral tanpa menunggu settle (untuk simulasi & 's').
@@ -180,15 +211,32 @@ public:
         _ph += dt * 1000.0f / prof.cycleMs;
         while (_ph >= 1.0f) _ph -= 1.0f;
 
+        // Vektor langkah tiap kaki = translasi + rotasi (v = omega x r).
+        float sxa[6], sya[6], magMax = 0.0f;
+        for (uint8_t leg = 0; leg < 6; leg++) {
+            float rx = _home[leg][0], ry = _home[leg][1];
+            sxa[leg] = (_cX + (-_cYaw * ry / MO_YAW_RADIUS)) * prof.stepL;
+            sya[leg] = (_cY + ( _cYaw * rx / MO_YAW_RADIUS)) * prof.stepL;
+            float m = sqrtf(sxa[leg] * sxa[leg] + sya[leg] * sya[leg]);
+            if (m > magMax) magMax = m;
+        }
+        // NORMALISASI — bagian terpenting di file ini.
+        // Tanpa ini, perintah maju dan putar SALING MENAMBAH: "maju 0,8 +
+        // putar 0,7" (persis yang dihasilkan wall-following) membuat kaki
+        // terluar melangkah 115 mm padahal stepLength 60 mm, dan coxa diminta
+        // 417 der/s — jauh di atas kemampuan servo. Satu faktor skala dipakai
+        // untuk KEENAM kaki supaya arah tiap vektor tidak berubah: putaran
+        // murni tetap putaran murni, cuma amplitudonya dibatasi.
+        if (magMax > prof.stepL && magMax > 0.001f) {
+            float f = prof.stepL / magMax;
+            for (uint8_t leg = 0; leg < 6; leg++) { sxa[leg] *= f; sya[leg] *= f; }
+        }
+
         for (uint8_t leg = 0; leg < 6; leg++) {
             // tripod: {0,2,4} sefase, {1,3,5} geser setengah siklus
             float lp = _ph + ((leg % 2 == 0) ? 0.0f : 0.5f);
             if (lp >= 1.0f) lp -= 1.0f;
-
-            // vektor langkah kaki ini = translasi + rotasi (v = omega x r)
-            float rx = _home[leg][0], ry = _home[leg][1];
-            float sx = (_cX + (-_cYaw * ry / MO_YAW_RADIUS)) * prof.stepL;
-            float sy = (_cY + ( _cYaw * rx / MO_YAW_RADIUS)) * prof.stepL;
+            float sx = sxa[leg], sy = sya[leg];
 
             float dx, dy, dz;
             if (lp < duty) {
@@ -214,9 +262,9 @@ public:
     // jangkauan (sudah di-clamp oleh ikSolve).
     bool solve(float out[18]) {
         bool ok = true;
-        float pr = bodyPitch * DEG2RAD;
-        float rr = bodyRoll  * DEG2RAD;
-        float yr = bodyYaw   * DEG2RAD;
+        float pr = (bodyPitch + trimPitch) * DEG2RAD;
+        float rr = (bodyRoll  + trimRoll ) * DEG2RAD;
+        float yr =  bodyYaw   * DEG2RAD;
         for (uint8_t leg = 0; leg < 6; leg++) {
             float p[3], b[3], d[3];
             p[0] = legTargets[leg][0] - bodyTx;
